@@ -34,6 +34,7 @@ import java.util.Map.Entry;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -67,6 +68,9 @@ public class SkillCliExecutorService {
 
     // 破坏性命令闸门：高风险写操作必须由用户原话确认，不允许模型自动确认。
     private final DestructiveCommandGuard destructiveCommandGuard;
+
+    // 飞书 CLI 原生 Skill 缓存，避免每个规划步骤重复启动 lark-cli 读取同一份文档。
+    private final Map<String, String> nativeSkillCache = new ConcurrentHashMap<>();
 
     // CLI 内部规划器使用的大模型。
     private final ChatModel chatModel;
@@ -1426,22 +1430,113 @@ public class SkillCliExecutorService {
     }
 
     private String readSkill(String domain) {
+        // 优先读取 lark-cli 内置原生 Skill 文档，项目本地 md 只作为补充规则和兜底。
+        String nativeSkill = readNativeSkill(domain);
+        String projectSkill = readProjectSkill(domain);
+        String nativeSkillName = nativeSkillName(domain);
+
+        // 原生 Skill 存在时，把原生文档放在前面，项目补充规则放在后面。
+        if (!nativeSkill.isBlank()) {
+            return """
+                    # 飞书 CLI 原生 Skill
+
+                    来源：`lark-cli skills read %s`
+
+                    %s
+
+                    # 项目补充规则
+
+                    %s
+                    """.formatted(nativeSkillName, nativeSkill, projectSkill);
+        }
+
+        // 原生 Skill 读取失败时回退本地补充规则。
+        return projectSkill;
+    }
+
+    private String readProjectSkill(String domain) {
         try {
-            // 第一层 Skill：飞书原生能力，统一放在 resources/skills/lark 目录。
-            // 这一层只描述 lark-cli 在某个业务域能做什么、调用约定是什么，不掺业务规则。
+            // 项目补充规则统一放在 resources/skills/lark 目录。
+            // 这一层只写本项目约束和兜底提示，不替代 lark-cli 原生 Skill。
             ClassPathResource resource = new ClassPathResource("skills/lark/" + domain + ".md");
 
-            // 如果没有对应 Skill，就使用通用说明。
+            // 如果没有对应补充规则，就使用通用说明。
             if (!resource.exists()) {
-                return "没有找到专用 Skill。请先通过 lark-cli " + domain + " --help 查询能力，再谨慎执行。";
+                return "没有找到项目补充规则。请优先参考 lark-cli 原生 Skill 和 lark-cli " + domain + " --help。";
             }
 
-            // 读取 Skill 文件内容。
+            // 读取项目补充规则文件内容。
             return resource.getContentAsString(StandardCharsets.UTF_8);
         } catch (Exception e) {
-            // Skill 读取失败时抛出业务异常。
-            throw new IllegalStateException("读取 Skill 失败：" + domain, e);
+            // 项目补充规则读取失败时抛出业务异常。
+            throw new IllegalStateException("读取项目补充规则失败：" + domain, e);
         }
+    }
+
+    private String readNativeSkill(String domain) {
+        // 按业务域映射到 lark-cli 内置 Skill 名称。
+        String skillName = nativeSkillName(domain);
+        if (skillName.isBlank()) {
+            return "";
+        }
+
+        // 优先读缓存，避免同一个请求里反复启动 lark-cli。
+        String cached = nativeSkillCache.get(skillName);
+        if (cached != null) {
+            return cached;
+        }
+
+        // 调用 lark-cli skills read 读取原生 Skill。
+        List<String> command = List.of(properties.getCliCommand(), "skills", "read", skillName);
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.environment().put("LC_ALL", "C.UTF-8");
+        processBuilder.environment().put("LANG", "C.UTF-8");
+
+        try {
+            Process process = processBuilder.start();
+            boolean finished = process.waitFor(8, TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                log.warn("[阶段5 SkillCLI规划] 读取飞书CLI原生Skill超时：业务域={}，原生Skill={}", domain, skillName);
+                return "";
+            }
+
+            String stdout = readStream(process.getInputStream());
+            String stderr = readStream(process.getErrorStream());
+            if (process.exitValue() != 0 || stdout.isBlank()) {
+                log.warn("[阶段5 SkillCLI规划] 读取飞书CLI原生Skill失败：业务域={}，原生Skill={}，退出码={}，错误={}",
+                        domain, skillName, process.exitValue(), truncate(stderr));
+                return "";
+            }
+
+            nativeSkillCache.put(skillName, stdout);
+            log.info("[阶段5 SkillCLI规划] 已读取飞书CLI原生Skill：业务域={}，原生Skill={}，内容长度={}",
+                    domain, skillName, stdout.length());
+            return stdout;
+        } catch (Exception e) {
+            log.warn("[阶段5 SkillCLI规划] 读取飞书CLI原生Skill异常：业务域={}，原生Skill={}，错误={}",
+                    domain, skillName, e.getMessage());
+            return "";
+        }
+    }
+
+    private String nativeSkillName(String domain) {
+        // 把项目里的业务域名称映射到 lark-cli 内置 Skill 名称。
+        return switch (domain) {
+            case "im" -> "lark-im";
+            case "base" -> "lark-base";
+            case "docs", "mindnotes" -> "lark-doc";
+            case "calendar" -> "lark-calendar";
+            case "vc", "minutes", "note" -> "lark-meeting";
+            case "contact" -> "lark-contact";
+            case "approval" -> "lark-approval";
+            case "attendance" -> "lark-attendance";
+            case "drive" -> "lark-drive";
+            case "wiki" -> "lark-wiki";
+            case "markdown" -> "lark-markdown";
+            case "whiteboard" -> "lark-whiteboard";
+            default -> "";
+        };
     }
 
     private String readAllowedSkills(String primaryDomain) {
