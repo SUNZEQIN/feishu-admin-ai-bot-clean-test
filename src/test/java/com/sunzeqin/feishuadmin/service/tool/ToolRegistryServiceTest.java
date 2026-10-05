@@ -112,7 +112,7 @@ class ToolRegistryServiceTest {
         FeishuProperties properties = new FeishuProperties();
         registry = newRegistry(mock(SkillCliExecutorService.class), properties);
 
-        // 启动自检不抛异常，并保证四个工具都在说明文本里。
+        // 启动自检不抛异常，并保证工具都在说明文本里。
         registry.verifyToolCatalog();
         String descriptions = registry.toolDescriptions();
 
@@ -120,12 +120,16 @@ class ToolRegistryServiceTest {
         assertTrue(descriptions.contains("feishu.scope_for_domain"));
         assertTrue(descriptions.contains("ecommerce.list_tools"));
         assertTrue(descriptions.contains("ecommerce.call_tool"));
-        assertEquals(4, descriptions.lines().filter(line -> line.matches("\\s*\\d+\\.\\s*[a-z][a-z0-9_.]+\\s*")).count());
+        assertTrue(descriptions.contains("workflow.list"));
+        assertTrue(descriptions.contains("workflow.run"));
+        assertEquals(6, descriptions.lines().filter(line -> line.matches("\\s*\\d+\\.\\s*[a-z][a-z0-9_.]+\\s*")).count());
     }
 
     private ToolRegistryService newRegistry(SkillCliExecutorService cli, FeishuProperties properties) {
         // 用 Mock 构造依赖，避免测试依赖数据库和飞书网络。
         return new ToolRegistryService(cli, mock(EcommerceMcpClientService.class),
-                mock(FeishuUserScopeMappingService.class), new ToolPermissionService(properties), properties);
+                mock(FeishuUserScopeMappingService.class),
+                mock(com.sunzeqin.feishuadmin.service.workflow.WorkflowExecutionService.class),
+                new ToolPermissionService(properties), properties);
     }
 }

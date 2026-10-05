@@ -6,6 +6,7 @@ import com.sunzeqin.feishuadmin.pojo.tool.ToolResult;
 import com.sunzeqin.feishuadmin.service.EcommerceMcpClientService;
 import com.sunzeqin.feishuadmin.service.FeishuUserScopeMappingService;
 import com.sunzeqin.feishuadmin.service.cli.SkillCliExecutorService;
+import com.sunzeqin.feishuadmin.service.workflow.WorkflowExecutionService;
 import com.sunzeqin.feishuadmin.utils.LlmErrorUtils;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -47,7 +48,9 @@ public class ToolRegistryService {
             "cli.run_skill",
             "feishu.scope_for_domain",
             "ecommerce.list_tools",
-            "ecommerce.call_tool");
+            "ecommerce.call_tool",
+            "workflow.list",
+            "workflow.run");
 
     // 从工具说明文本里提取工具名的正则，用于启动自检说明与执行是否一致。
     private static final Pattern TOOL_NAME_IN_DESCRIPTION = Pattern.compile("(?m)^\\s*\\d+\\.\\s*([a-z][a-z0-9_.]+)\\s*$");
@@ -61,6 +64,9 @@ public class ToolRegistryService {
     // 飞书用户身份 scope 映射服务，负责查询业务域需要的授权范围。
     private final FeishuUserScopeMappingService scopeMappingService;
 
+    // 工作流执行服务，负责查询和执行数据库里的可配置工作流。
+    private final WorkflowExecutionService workflowExecutionService;
+
     // 工具调用权限校验服务，负责判断调用者和会话是否有权限。
     private final ToolPermissionService toolPermissionService;
 
@@ -71,8 +77,8 @@ public class ToolRegistryService {
     private final ExecutorService toolExecutor;
 
     public ToolRegistryService(SkillCliExecutorService skillCliExecutor, EcommerceMcpClientService ecommerceMcpClient,
-            FeishuUserScopeMappingService scopeMappingService, ToolPermissionService toolPermissionService,
-            FeishuProperties properties) {
+            FeishuUserScopeMappingService scopeMappingService, WorkflowExecutionService workflowExecutionService,
+            ToolPermissionService toolPermissionService, FeishuProperties properties) {
         // 保存 Skill + CLI 执行服务。
         this.skillCliExecutor = skillCliExecutor;
 
@@ -81,6 +87,9 @@ public class ToolRegistryService {
 
         // 保存用户身份 scope 映射服务。
         this.scopeMappingService = scopeMappingService;
+
+        // 保存工作流执行服务。
+        this.workflowExecutionService = workflowExecutionService;
 
         // 保存权限校验服务。
         this.toolPermissionService = toolPermissionService;
@@ -163,6 +172,18 @@ public class ToolRegistryService {
                    toolName 例如 ecommerce.query_top_products、ecommerce.query_low_inventory、ecommerce.query_customer_orders。
                    arguments 是电商工具入参，例如 limit、threshold、customerName、months。
                    注意：电商数据分析、订单、商品、库存、退款、客户画像、活动复盘需求，应优先调用这个工具拿真实结构化数据。
+
+                5. workflow.list
+                   作用：查询数据库里已启用的可配置工作流。
+                   参数：keyword。
+                   用途：当用户需求像常用业务流程，但你不确定 workflowCode 时，先调用它查候选。
+
+                6. workflow.run
+                   作用：执行数据库里配置好的工作流，Java 会按 workflow_step 顺序执行 MCP、CLI、LLM_SUMMARY、FEISHU_REPLY。
+                   参数：workflowCode, arguments。
+                   workflowCode 必须来自 workflow.list 返回或用户明确指定。
+                   arguments 是工作流初始参数，例如 customerName、months、sourceChatId、originalMessageId、senderOpenId。
+                   注意：工作流执行日志会打印每一步映射到哪个执行器和工具。
                 """;
     }
 
@@ -279,6 +300,16 @@ public class ToolRegistryService {
             return callEcommerceTool(call);
         }
 
+        // 根据工具名称分发到可配置工作流列表。
+        if ("workflow.list".equals(call.name())) {
+            return listWorkflows(call);
+        }
+
+        // 根据工具名称分发到可配置工作流执行。
+        if ("workflow.run".equals(call.name())) {
+            return runWorkflow(call);
+        }
+
         // 理论上不会走到这里：execute 已经用白名单挡过一次。
         return ToolResult.failed(call.name(), "未知工具：" + call.name());
     }
@@ -375,6 +406,41 @@ public class ToolRegistryService {
         return ToolResult.success(call.name(), "调用电商 MCP 工具完成", data);
     }
 
+    private ToolResult listWorkflows(ToolCall call) {
+        // 读取关键词。
+        String keyword = stringParam(call, "keyword");
+
+        // 查询候选工作流。
+        Map<String, Object> data = workflowExecutionService.listWorkflows(keyword);
+
+        // 返回查询结果。
+        return ToolResult.success(call.name(), "查询可配置工作流成功", data);
+    }
+
+    private ToolResult runWorkflow(ToolCall call) {
+        // 读取工作流编码。
+        String workflowCode = stringParam(call, "workflowCode");
+        if (workflowCode.isBlank()) {
+            return ToolResult.failed(call.name(), "workflow.run 缺少 workflowCode 参数");
+        }
+
+        // 读取模型传入的工作流参数。
+        Map<String, Object> arguments = mapParam(call, "arguments");
+        java.util.HashMap<String, Object> mergedArguments = new java.util.HashMap<>(arguments);
+
+        // 合并真实飞书事件上下文，避免模型自己编造这些关键字段。
+        copyIfPresent(call, mergedArguments, "sourceChatId");
+        copyIfPresent(call, mergedArguments, "originalMessageId");
+        copyIfPresent(call, mergedArguments, "senderOpenId");
+        copyIfPresent(call, mergedArguments, "senderUserId");
+
+        // 执行工作流。
+        Map<String, Object> data = workflowExecutionService.runWorkflow(workflowCode, mergedArguments);
+
+        // 返回执行结果。
+        return ToolResult.success(call.name(), "可配置工作流执行完成", data);
+    }
+
     private String stringParam(ToolCall call, String key) {
         // 从参数 Map 里取值。
         Object value = call.params().get(key);
@@ -405,6 +471,14 @@ public class ToolRegistryService {
 
         // 不存在时返回空 Map。
         return Map.of();
+    }
+
+    private void copyIfPresent(ToolCall call, Map<String, Object> target, String key) {
+        // 从工具调用参数里复制事件上下文字段。
+        Object value = call.params().get(key);
+        if (value != null && !value.toString().isBlank()) {
+            target.put(key, value);
+        }
     }
 
     private ThreadFactory namedDaemonFactory() {

@@ -142,6 +142,16 @@ public class AgentOrchestratorService {
             // 保存工具观察结果。
             observations.add(result);
 
+            // 工作流执行完成后，如果已经生成最终回复，就直接结束，避免再让 LLM 复述一轮。
+            String workflowReply = workflowReplyFromToolResult(result);
+            if (!workflowReply.isBlank()) {
+                log.info("[阶段10 工作流执行] 工作流已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
+                        event.messageId(), step, result.tool(), workflowReply.length());
+                AgentRunResult runResult = new AgentRunResult(true, workflowReply);
+                memoryService.saveAssistantMessage(event, runResult.reply());
+                return runResult;
+            }
+
             // 如果工具已经返回授权链接，直接回复用户，不再交给大模型二次解释，避免误说“不支持授权”。
             String authorizeReply = authorizeReplyFromToolResult(result);
             if (!authorizeReply.isBlank()) {
@@ -193,6 +203,22 @@ public class AgentOrchestratorService {
         return "需要你授权后才能继续执行。\n\n"
                 + "请扫描二维码完成授权。\n\n"
                 + "授权完成后，系统会保存到用户表并定时刷新 token。";
+    }
+
+    private String workflowReplyFromToolResult(ToolResult result) {
+        // 只处理 workflow.run 的最终回复。
+        if (result == null || !"workflow.run".equals(result.tool()) || result.data() == null) {
+            return "";
+        }
+
+        // 读取 workflow.run 返回的 finalReply。
+        Object finalReply = result.data().get("finalReply");
+        if (finalReply == null || finalReply.toString().isBlank()) {
+            return "";
+        }
+
+        // 返回最终回复。
+        return finalReply.toString();
     }
 
     private String authorizeUrlFromToolResult(ToolResult result) {
