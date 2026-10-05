@@ -61,3 +61,39 @@ CREATE TABLE IF NOT EXISTS feishu_oauth_state (
     KEY idx_oauth_state_user (app_id, user_open_id),
     KEY idx_oauth_state_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='飞书OAuth授权状态表';
+
+CREATE TABLE IF NOT EXISTS workflow_definition (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    workflow_code VARCHAR(128) NOT NULL COMMENT '工作流编码，业务唯一',
+    workflow_name VARCHAR(255) NOT NULL COMMENT '工作流名称',
+    domain VARCHAR(64) NOT NULL DEFAULT '' COMMENT '业务域：feishu/ecommerce/mixed等',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用：0=停用，1=启用',
+    risk_level VARCHAR(32) NOT NULL DEFAULT 'LOW' COMMENT '风险等级：LOW/MEDIUM/HIGH',
+    require_user_confirm TINYINT NOT NULL DEFAULT 0 COMMENT '是否需要用户二次确认：0=否，1=是',
+    intent_keywords TEXT NOT NULL COMMENT '触发关键词，JSON数组',
+    description TEXT NOT NULL COMMENT '工作流说明',
+    source_format VARCHAR(32) NOT NULL DEFAULT 'YAML' COMMENT '导入来源格式：YAML/JSON',
+    source_content MEDIUMTEXT NOT NULL COMMENT '原始导入内容，便于排查和回放',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_workflow_code (workflow_code),
+    KEY idx_workflow_enabled_domain (enabled, domain)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='可配置工作流定义表';
+
+CREATE TABLE IF NOT EXISTS workflow_step (
+    id BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+    workflow_code VARCHAR(128) NOT NULL COMMENT '工作流编码',
+    step_no INT NOT NULL COMMENT '步骤序号，从1开始',
+    step_name VARCHAR(255) NOT NULL COMMENT '步骤名称',
+    executor_type VARCHAR(64) NOT NULL COMMENT '执行器类型：MCP/CLI/JAVA_TOOL/LLM_SUMMARY/FEISHU_REPLY',
+    tool_name VARCHAR(255) NOT NULL DEFAULT '' COMMENT '工具名称，例如 ecommerce.query_customer_orders',
+    input_template MEDIUMTEXT NOT NULL COMMENT '入参模板，JSON对象',
+    output_key VARCHAR(128) NOT NULL DEFAULT '' COMMENT '本步骤输出变量名',
+    on_error VARCHAR(32) NOT NULL DEFAULT 'STOP' COMMENT '失败处理策略：STOP/RETRY/FALLBACK',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_workflow_step_no (workflow_code, step_no),
+    KEY idx_workflow_step_tool (executor_type, tool_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='可配置工作流步骤表';
