@@ -60,6 +60,12 @@ public class AgentOrchestratorService {
 
         // 读取当前用户在当前会话里的历史记忆。
         String memoryText = memoryService.readMemoryText(event);
+        log.info("[阶段3 外层Agent规划] 会话记忆已注入：消息ID={}，会话类型={}，记忆文本长度={}，是否包含历史摘要={}，是否包含近期对话={}",
+                event.messageId(),
+                event.chatType(),
+                memoryText == null ? 0 : memoryText.length(),
+                containsMemorySection(memoryText, "历史摘要："),
+                containsMemorySection(memoryText, "近期对话："));
 
         // 保存当前用户输入，供下一轮对话使用。
         memoryService.saveUserMessage(event);
@@ -235,6 +241,16 @@ public class AgentOrchestratorService {
         if (value != null && !value.isBlank()) {
             params.put(key, value);
         }
+    }
+
+    private boolean containsMemorySection(String memoryText, String sectionName) {
+        // 空记忆直接认为没有命中。
+        if (memoryText == null || memoryText.isBlank()) {
+            return false;
+        }
+
+        // 只判断段落是否存在，避免在 INFO 日志里打印真实历史内容。
+        return memoryText.contains(sectionName) && !memoryText.contains(sectionName + "无");
     }
 
 }

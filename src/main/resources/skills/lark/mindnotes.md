@@ -13,6 +13,8 @@
 
 1. 先查帮助，不要猜命令。
 2. 操作前必须确认 mindnote id。
+3. 如果用户说“把上文/群聊总结做成思维导图”，且没有提供已有 mindnote id，不要强行创建 mindnotes 节点；优先交给 Java 侧固定流程创建 Markdown 文档形式的思维导图。
+4. 如果 `mindnotes` / `wiki` 空间信息不足，立即降级为 `docs +create --doc-format markdown`，不要反复查询帮助或空间列表。
 
 ## 手册命令索引
 

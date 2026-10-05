@@ -26,9 +26,11 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -118,6 +120,12 @@ public class SkillCliExecutorService {
                 sourceChatId, originalMessageId, senderOpenId, senderUserId);
         if (!authorizeResult.isEmpty()) {
             return authorizeResult;
+        }
+
+        // 思维导图类追问通常已经由外层 Agent 把群聊记忆整理进 goal。
+        // 这里直接创建 Markdown 文档，避免内层模型反复探索 mindnotes/wiki/drive/help 导致超过最大步骤数。
+        if (shouldCreateMindMapDocument(normalizedDomain, goal)) {
+            return createMindMapDocument(normalizedDomain, goal, sourceChatId, senderOpenId);
         }
 
         // 读取所有允许业务域的 Skill 文档，让复合任务可以跨域执行。
@@ -285,6 +293,169 @@ public class SkillCliExecutorService {
             throw new IllegalStateException("Skill + CLI 超过最大步骤数，已停止执行");
         }
         throw new IllegalStateException("Skill + CLI 超过最大步骤数，已停止执行。最后一次失败原因：" + lastFailure);
+    }
+
+    private boolean shouldCreateMindMapDocument(String domain, String goal) {
+        // 空目标不处理。
+        if (goal == null || goal.isBlank()) {
+            return false;
+        }
+
+        // 只处理和思维导图相关的目标。
+        boolean mindMapIntent = goal.contains("思维导图")
+                || goal.contains("脑图")
+                || goal.contains("思维笔记");
+        if (!mindMapIntent) {
+            return false;
+        }
+
+        // 用户明确要操作已有节点时，仍交给普通 SkillCLI 流程，避免误建文档。
+        if (goal.contains("节点") || goal.contains("node") || goal.contains("mindnote id")) {
+            return false;
+        }
+
+        // 只在这些文档型业务域里启用直达流程。
+        return "mindnotes".equals(domain)
+                || "docs".equals(domain)
+                || "markdown".equals(domain);
+    }
+
+    private Map<String, Object> createMindMapDocument(String domain, String goal,
+            String sourceChatId, String senderOpenId) {
+        ensureDomainAllowed("docs");
+
+        // 组装标题和正文。
+        String title = "当前群聊总结思维导图";
+        String content = buildMindMapMarkdown(goal);
+
+        // 使用 docs +create 创建 Markdown 文档。这里使用 ProcessBuilder 参数数组，不经过 shell。
+        List<String> command = List.of(
+                properties.getCliCommand(),
+                "docs",
+                "+create",
+                "--title",
+                title,
+                "--doc-format",
+                "markdown",
+                "--content",
+                content,
+                "--as",
+                "bot",
+                "--format",
+                "json"
+        );
+
+        // 打印直达流程日志。
+        log.info("[阶段5 SkillCLI规划] 命中思维导图直达流程：业务域={}，标题={}，内容长度={}",
+                domain, title, content.length());
+
+        // 执行创建文档命令。
+        CliCommandResult result = executeCommand(command, senderOpenId);
+        List<CliCommandResult> observations = new ArrayList<>();
+        observations.add(result);
+
+        // 创建失败时保留真实 CLI 原因。
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("创建思维导图文档失败：" + summarizeCommandFailure(result));
+        }
+
+        // 从返回结果里提取文档链接或 token，提取不到也不影响成功判断。
+        String documentUrl = findJsonText(result.stdout(), "url");
+        if (documentUrl.isBlank()) {
+            documentUrl = findJsonText(result.stdout(), "token");
+        }
+        String finalReply = "已根据群聊记忆和上文总结创建思维导图文档。";
+        if (!documentUrl.isBlank()) {
+            finalReply = finalReply + "\n\n文档信息：" + documentUrl;
+        }
+
+        // 返回给外层 Agent。
+        return Map.of(
+                "domain", domain,
+                "goal", goal,
+                "sourceChatId", sourceChatId,
+                "finalReply", finalReply,
+                "observations", observations
+        );
+    }
+
+    private String buildMindMapMarkdown(String goal) {
+        // 保留外层 Agent 已经整理好的内容，同时加上稳定的 Markdown 层级。
+        String body = goal == null ? "" : goal.trim();
+        int maxBodyChars = 12000;
+        if (body.length() > maxBodyChars) {
+            body = body.substring(0, maxBodyChars) + "\n\n> 内容较长，后续部分已截断。";
+        }
+
+        return """
+                # 当前群聊总结思维导图
+
+                ## 中心主题
+
+                当前群聊总结
+
+                ## 分支内容
+
+                %s
+
+                ## 后续跟进
+
+                - 根据未决事项继续拆任务
+                - 需要落地执行时，可以继续在群里 @机器人
+                """.formatted(body);
+    }
+
+    private String findJsonText(String json, String fieldName) {
+        // 空文本直接返回。
+        if (json == null || json.isBlank() || fieldName == null || fieldName.isBlank()) {
+            return "";
+        }
+
+        try {
+            // CLI 成功输出通常是 JSON，递归查找常见字段。
+            JsonNode root = jsonUtils.readTree(json);
+            return findJsonText(root, fieldName);
+        } catch (Exception e) {
+            // 非 JSON 输出时不报错，创建成功本身由退出码判断。
+            return "";
+        }
+    }
+
+    private String findJsonText(JsonNode node, String fieldName) {
+        // 空节点直接返回。
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+
+        // 当前节点直接命中。
+        if (node.has(fieldName) && node.get(fieldName).isTextual()) {
+            return node.get(fieldName).asText("");
+        }
+
+        // 对象节点递归查找。
+        if (node.isObject()) {
+            Iterator<Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Entry<String, JsonNode> field = fields.next();
+                String value = findJsonText(field.getValue(), fieldName);
+                if (!value.isBlank()) {
+                    return value;
+                }
+            }
+        }
+
+        // 数组节点递归查找。
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                String value = findJsonText(item, fieldName);
+                if (!value.isBlank()) {
+                    return value;
+                }
+            }
+        }
+
+        // 没找到。
+        return "";
     }
 
     private boolean hasSuccessfulCommand(List<CliCommandResult> observations, List<String> command) {
