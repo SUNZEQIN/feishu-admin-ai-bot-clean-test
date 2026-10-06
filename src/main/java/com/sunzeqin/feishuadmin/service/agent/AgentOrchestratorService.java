@@ -5,8 +5,10 @@ import com.sunzeqin.feishuadmin.pojo.agent.AgentDecision;
 import com.sunzeqin.feishuadmin.pojo.agent.AgentRunResult;
 import com.sunzeqin.feishuadmin.pojo.tool.ToolCall;
 import com.sunzeqin.feishuadmin.pojo.tool.ToolResult;
+import com.sunzeqin.feishuadmin.pojo.workflow.WorkflowRouteResult;
 import com.sunzeqin.feishuadmin.service.ConversationMemoryService;
 import com.sunzeqin.feishuadmin.service.tool.ToolRegistryService;
+import com.sunzeqin.feishuadmin.service.workflow.WorkflowRouterService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,8 +43,11 @@ public class AgentOrchestratorService {
     // 会话记忆服务，用来读取和保存用户上下文。
     private final ConversationMemoryService memoryService;
 
+    // 工作流路由服务，用来在通用 Agent 规划前优先匹配可配置工作流。
+    private final WorkflowRouterService workflowRouterService;
+
     public AgentOrchestratorService(AgentPlannerService planner, ToolRegistryService toolRegistry,
-            ConversationMemoryService memoryService) {
+            ConversationMemoryService memoryService, WorkflowRouterService workflowRouterService) {
         // 保存 Agent 规划器。
         this.planner = planner;
 
@@ -51,6 +56,9 @@ public class AgentOrchestratorService {
 
         // 保存会话记忆服务。
         this.memoryService = memoryService;
+
+        // 保存工作流路由服务。
+        this.workflowRouterService = workflowRouterService;
     }
 
     public AgentRunResult run(FeishuMessageEvent event) {
@@ -84,6 +92,12 @@ public class AgentOrchestratorService {
 
         // 保存每一步工具观察结果。
         List<ToolResult> observations = new ArrayList<>();
+
+        // 在通用大模型规划前先尝试命中可配置工作流。
+        AgentRunResult workflowRunResult = tryRunWorkflow(event, memoryText);
+        if (workflowRunResult != null) {
+            return workflowRunResult;
+        }
 
         // 最多执行 MAX_STEPS 轮。
         for (int step = 1; step <= MAX_STEPS; step++) {
@@ -180,6 +194,55 @@ public class AgentOrchestratorService {
         AgentRunResult result = new AgentRunResult(false, "⚠️ 本次任务步骤过多，已停止执行，避免重复操作。");
         memoryService.saveAssistantMessage(event, result.reply());
         return result;
+    }
+
+    private AgentRunResult tryRunWorkflow(FeishuMessageEvent event, String memoryText) {
+        // 工作流路由失败不能影响原有 Agent 链路，异常时回退到通用规划。
+        WorkflowRouteResult routeResult;
+        try {
+            routeResult = workflowRouterService.route(event, memoryText);
+        } catch (Exception e) {
+            log.warn("[阶段10 工作流路由] 路由异常，回退到外层Agent规划：消息ID={}，错误={}",
+                    event.messageId(), e.getMessage());
+            return null;
+        }
+
+        // 未命中时走原来的 Agent 规划。
+        if (routeResult == null || !routeResult.matched()) {
+            log.info("[阶段10 工作流路由] 未命中工作流，继续外层Agent规划：消息ID={}，原因={}",
+                    event.messageId(), routeResult == null ? "路由结果为空" : routeResult.reason());
+            return null;
+        }
+
+        // 命中工作流后直接调用 workflow.run，不再让外层 LLM 二次选择。
+        Map<String, Object> params = new HashMap<>();
+        params.put("workflowCode", routeResult.workflowCode());
+        params.put("arguments", routeResult.arguments());
+        ToolCall toolCall = enrichToolCall(event, new ToolCall("workflow.run", params));
+
+        log.info("[阶段10 工作流路由] 准备执行命中工作流：消息ID={}，workflowCode={}，置信度={}，原因={}",
+                event.messageId(), routeResult.workflowCode(), routeResult.confidence(), routeResult.reason());
+
+        ToolResult result = toolRegistry.execute(toolCall);
+        log.info("[阶段10 工作流路由] 工作流工具返回：消息ID={}，workflowCode={}，是否成功={}，说明={}，数据字段={}",
+                event.messageId(), routeResult.workflowCode(), result.success(), result.message(), result.data().keySet());
+
+        if (!result.success()) {
+            AgentRunResult runResult = new AgentRunResult(false, "⚠️ 执行失败\n\n🔎 原因：" + result.message());
+            memoryService.saveAssistantMessage(event, runResult.reply());
+            return runResult;
+        }
+
+        String workflowReply = workflowReplyFromToolResult(result);
+        if (!workflowReply.isBlank()) {
+            AgentRunResult runResult = new AgentRunResult(true, workflowReply);
+            memoryService.saveAssistantMessage(event, runResult.reply());
+            return runResult;
+        }
+
+        AgentRunResult runResult = new AgentRunResult(true, "✅ 工作流执行完成：" + routeResult.workflowCode());
+        memoryService.saveAssistantMessage(event, runResult.reply());
+        return runResult;
     }
 
     private String authorizeReplyFromToolResult(ToolResult result) {
