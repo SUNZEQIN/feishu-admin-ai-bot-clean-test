@@ -20,6 +20,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 工作流路由服务。
@@ -41,6 +43,9 @@ public class WorkflowRouterService {
 
     // 自动执行最低置信度，宁可不命中，也不要误执行。
     private static final double MIN_LLM_CONFIDENCE = 0.85;
+
+    // 从“最近12个月 / 近 3 个月”这类文本里提取月份。
+    private static final Pattern MONTH_PATTERN = Pattern.compile("(\\d{1,2})\\s*个?月");
 
     private final JdbcTemplate jdbcTemplate;
     private final JsonUtils jsonUtils;
@@ -108,12 +113,18 @@ public class WorkflowRouterService {
             arguments.putAll(decision.arguments());
         }
 
+        Map<String, Object> normalizedArguments = normalizeArguments(arguments, event.text());
+        if (!normalizedArguments.keySet().equals(arguments.keySet())) {
+            log.info("[阶段10 工作流路由] 入参已归一化：消息ID={}，原始字段={}，归一化字段={}",
+                    event.messageId(), arguments.keySet(), normalizedArguments.keySet());
+        }
+
         log.info("[阶段10 工作流路由] 命中工作流：消息ID={}，workflowCode={}，workflowName={}，置信度={}，原因={}，入参字段={}",
                 event.messageId(), matched.workflowCode(), matched.workflowName(),
-                decision.confidence(), decision.reason(), arguments.keySet());
+                decision.confidence(), decision.reason(), normalizedArguments.keySet());
 
         return new WorkflowRouteResult(true, matched.workflowCode(), decision.confidence(),
-                decision.reason(), arguments);
+                decision.reason(), normalizedArguments);
     }
 
     private List<WorkflowRouteCandidate> findCandidates(String routingText) {
@@ -306,6 +317,64 @@ public class WorkflowRouterService {
         arguments.put("senderUserId", event.userId());
         arguments.put("userText", event.text());
         return arguments;
+    }
+
+    private Map<String, Object> normalizeArguments(Map<String, Object> arguments, String userText) {
+        // 模型抽参经常使用 snake_case，这里统一补成工作流模板常用的 camelCase。
+        Map<String, Object> result = new LinkedHashMap<>(arguments);
+        copyAlias(result, "customerName", "customer_name");
+        copyAlias(result, "customerName", "customer");
+        copyAlias(result, "customerName", "name");
+        copyAlias(result, "timeRange", "time_range");
+
+        // months 没有直接给出时，从 timeRange 或用户原文里提取。
+        if (blankValue(result.get("months"))) {
+            Integer months = parseMonths(result.get("timeRange"));
+            if (months == null) {
+                months = parseMonths(userText);
+            }
+            if (months != null) {
+                result.put("months", months);
+            }
+        }
+        return result;
+    }
+
+    private void copyAlias(Map<String, Object> arguments, String targetKey, String aliasKey) {
+        // 目标字段已有值时不覆盖，只在缺失时补别名。
+        if (!blankValue(arguments.get(targetKey))) {
+            return;
+        }
+        Object value = arguments.get(aliasKey);
+        if (!blankValue(value)) {
+            arguments.put(targetKey, value);
+        }
+    }
+
+    private boolean blankValue(Object value) {
+        return value == null || value.toString().isBlank();
+    }
+
+    private Integer parseMonths(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.toString();
+        Matcher matcher = MONTH_PATTERN.matcher(text);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        String normalized = normalize(text);
+        if (normalized.contains("近一年") || normalized.contains("最近一年") || normalized.contains("过去一年")) {
+            return 12;
+        }
+        if (normalized.contains("半年")) {
+            return 6;
+        }
+        if (normalized.contains("本月") || normalized.contains("这个月")) {
+            return 1;
+        }
+        return null;
     }
 
     private String candidateNames(List<WorkflowRouteCandidate> candidates) {

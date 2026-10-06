@@ -11,6 +11,7 @@ import com.sunzeqin.feishuadmin.service.tool.ToolRegistryService;
 import com.sunzeqin.feishuadmin.service.workflow.WorkflowRouterService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -62,6 +63,18 @@ public class AgentOrchestratorService {
     }
 
     public AgentRunResult run(FeishuMessageEvent event) {
+        Map<String, String> oldContext = MDC.getCopyOfContextMap();
+        putMdc("messageId", event.messageId());
+        putMdc("chatId", event.chatId());
+        putMdc("senderOpenId", event.openId());
+        try {
+            return runInternal(event);
+        } finally {
+            restoreMdc(oldContext);
+        }
+    }
+
+    private AgentRunResult runInternal(FeishuMessageEvent event) {
         // 打印 Agent 开始执行日志，方便用 messageId 串起整次请求。
         log.info("[阶段3 外层Agent规划] 开始执行：消息ID={}，会话ID={}，会话类型={}，最大步骤数={}，用户文本={}",
                 event.messageId(), event.chatId(), event.chatType(), MAX_STEPS, event.text());
@@ -371,6 +384,22 @@ public class AgentOrchestratorService {
 
         // 只判断段落是否存在，避免在 INFO 日志里打印真实历史内容。
         return memoryText.contains(sectionName) && !memoryText.contains(sectionName + "无");
+    }
+
+    private void putMdc(String key, String value) {
+        // 空值不写入 MDC，避免日志里出现无意义的 null。
+        if (value != null && !value.isBlank()) {
+            MDC.put(key, value);
+        }
+    }
+
+    private void restoreMdc(Map<String, String> oldContext) {
+        // 业务线程会复用，必须恢复旧 MDC，避免下一条消息串到上一条消息ID。
+        if (oldContext == null || oldContext.isEmpty()) {
+            MDC.clear();
+            return;
+        }
+        MDC.setContextMap(oldContext);
     }
 
 }

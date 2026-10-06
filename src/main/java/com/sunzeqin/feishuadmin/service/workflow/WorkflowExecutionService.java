@@ -11,6 +11,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +37,9 @@ public class WorkflowExecutionService {
 
     // 模板变量正则，支持 {{name}} 和 {{name|default:12}}。
     private static final Pattern TEMPLATE_PATTERN = Pattern.compile("\\{\\{\\s*([a-zA-Z][a-zA-Z0-9_]*)(?:\\|default:([^}]+))?\\s*}}");
+
+    // 从“最近12个月 / 近 3 个月”这类文本里提取月份。
+    private static final Pattern MONTH_PATTERN = Pattern.compile("(\\d{1,2})\\s*个?月");
 
     private final JdbcTemplate jdbcTemplate;
     private final JsonUtils jsonUtils;
@@ -82,6 +86,18 @@ public class WorkflowExecutionService {
     }
 
     public Map<String, Object> runWorkflow(String workflowCode, Map<String, Object> arguments) {
+        Map<String, String> oldContext = MDC.getCopyOfContextMap();
+        if (workflowCode != null && !workflowCode.isBlank()) {
+            MDC.put("workflowCode", workflowCode);
+        }
+        try {
+            return runWorkflowInternal(workflowCode, arguments);
+        } finally {
+            restoreMdc(oldContext);
+        }
+    }
+
+    private Map<String, Object> runWorkflowInternal(String workflowCode, Map<String, Object> arguments) {
         WorkflowDefinition workflow = loadWorkflow(workflowCode);
         List<WorkflowStep> steps = loadSteps(workflowCode);
 
@@ -100,9 +116,9 @@ public class WorkflowExecutionService {
         for (WorkflowStep step : steps) {
             long stepStartMillis = System.currentTimeMillis();
             Map<String, Object> input = renderInput(step.inputTemplate(), context);
-            log.info("[阶段10 工作流执行] 步骤开始：工作流编码={}，步骤={}，步骤名称={}，执行器类型={}，工具名称={}，入参字段={}，输出变量={}",
+            log.info("[阶段10 工作流执行] 步骤开始：工作流编码={}，步骤={}，步骤名称={}，执行器类型={}，工具名称={}，入参字段={}，入参摘要={}，输出变量={}",
                     workflowCode, step.stepNo(), step.stepName(), step.executorType(), step.toolName(),
-                    input.keySet(), step.outputKey());
+                    input.keySet(), summarizeInput(input), step.outputKey());
 
             try {
                 Object output = executeStep(step, input, context);
@@ -155,7 +171,9 @@ public class WorkflowExecutionService {
 
     private Object executeStep(WorkflowStep step, Map<String, Object> input, Map<String, Object> context) {
         if ("MCP".equals(step.executorType())) {
-            return ecommerceMcpClient.callTool(step.toolName(), input);
+            Map<String, Object> output = ecommerceMcpClient.callTool(step.toolName(), input);
+            ensureMcpSuccess(step, output);
+            return output;
         }
         if ("CLI".equals(step.executorType())) {
             return executeCliStep(input);
@@ -255,14 +273,127 @@ public class WorkflowExecutionService {
     }
 
     private Object resolveValue(String key, String defaultValue, Map<String, Object> context) {
-        Object value = context.get(key);
+        Object value = findContextValue(key, context);
         if (value != null && !value.toString().isBlank()) {
             return value;
+        }
+        if ("months".equals(key)) {
+            Integer months = parseMonths(findContextValue("timeRange", context));
+            if (months == null) {
+                months = parseMonths(findContextValue("userText", context));
+            }
+            if (months != null) {
+                return months;
+            }
         }
         if (defaultValue != null) {
             return defaultValue.trim();
         }
         return "";
+    }
+
+    private Object findContextValue(String key, Map<String, Object> context) {
+        Object value = context.get(key);
+        if (!blankValue(value)) {
+            return value;
+        }
+
+        value = context.get(toSnakeCase(key));
+        if (!blankValue(value)) {
+            return value;
+        }
+
+        value = context.get(toCamelCase(key));
+        if (!blankValue(value)) {
+            return value;
+        }
+
+        if ("customerName".equals(key)) {
+            value = firstPresent(context, "customer_name", "customer", "name");
+            if (!blankValue(value)) {
+                return value;
+            }
+        }
+        if ("timeRange".equals(key)) {
+            value = firstPresent(context, "time_range", "range", "period");
+            if (!blankValue(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private Object firstPresent(Map<String, Object> context, String... keys) {
+        for (String key : keys) {
+            Object value = context.get(key);
+            if (!blankValue(value)) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private boolean blankValue(Object value) {
+        return value == null || value.toString().isBlank();
+    }
+
+    private String toSnakeCase(String key) {
+        if (key == null || key.isBlank()) {
+            return "";
+        }
+        return key.replaceAll("([a-z])([A-Z])", "$1_$2").toLowerCase();
+    }
+
+    private String toCamelCase(String key) {
+        if (key == null || key.isBlank() || !key.contains("_")) {
+            return key == null ? "" : key;
+        }
+        StringBuilder builder = new StringBuilder();
+        boolean upperNext = false;
+        for (char ch : key.toCharArray()) {
+            if (ch == '_') {
+                upperNext = true;
+                continue;
+            }
+            builder.append(upperNext ? Character.toUpperCase(ch) : ch);
+            upperNext = false;
+        }
+        return builder.toString();
+    }
+
+    private Integer parseMonths(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.toString();
+        Matcher matcher = MONTH_PATTERN.matcher(text);
+        if (matcher.find()) {
+            return Integer.parseInt(matcher.group(1));
+        }
+        String normalized = text.replaceAll("\\s+", "");
+        if (normalized.contains("近一年") || normalized.contains("最近一年") || normalized.contains("过去一年")) {
+            return 12;
+        }
+        if (normalized.contains("半年")) {
+            return 6;
+        }
+        if (normalized.contains("本月") || normalized.contains("这个月")) {
+            return 1;
+        }
+        return null;
+    }
+
+    private void ensureMcpSuccess(WorkflowStep step, Map<String, Object> output) {
+        // 电商 MCP 返回 success=false 时必须阻断，不能把失败响应继续交给 LLM 总结成正常结果。
+        if (output == null) {
+            throw new IllegalStateException("MCP工具返回空响应：" + step.toolName());
+        }
+        Object success = output.get("success");
+        if (Boolean.FALSE.equals(success)) {
+            Object message = output.get("message");
+            throw new IllegalStateException("MCP工具调用失败：" + step.toolName()
+                    + "，原因=" + (message == null ? "未知错误" : message));
+        }
     }
 
     private WorkflowDefinition loadWorkflow(String workflowCode) {
@@ -407,6 +538,31 @@ public class WorkflowExecutionService {
 
         String text = output.toString().replaceAll("\\s+", " ").trim();
         return text.length() <= 200 ? text : text.substring(0, 200) + "...";
+    }
+
+    private String summarizeInput(Map<String, Object> input) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : input.entrySet()) {
+            Object value = entry.getValue();
+            if (value instanceof Map<?, ?> map) {
+                summary.put(entry.getKey(), "Map字段=" + map.keySet());
+            } else if (value instanceof List<?> list) {
+                summary.put(entry.getKey(), "List数量=" + list.size());
+            } else {
+                String text = value == null ? "" : value.toString().replaceAll("\\s+", " ").trim();
+                summary.put(entry.getKey(), text.length() <= 80 ? text : text.substring(0, 80) + "...");
+            }
+        }
+        return summary.toString();
+    }
+
+    private void restoreMdc(Map<String, String> oldContext) {
+        // 工作流执行结束后恢复 MDC，避免工作流编码串到下一次请求。
+        if (oldContext == null || oldContext.isEmpty()) {
+            MDC.clear();
+            return;
+        }
+        MDC.setContextMap(oldContext);
     }
 
     private String stringValue(Object value) {

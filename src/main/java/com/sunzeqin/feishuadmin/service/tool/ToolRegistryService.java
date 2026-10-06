@@ -12,6 +12,7 @@ import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashSet;
@@ -246,10 +247,13 @@ public class ToolRegistryService {
         // 读取配置的超时时间，最小 1 秒。
         int timeoutSeconds = Math.max(1, properties.getToolTimeoutSeconds());
 
+        // 工具调用会切到独立线程，提前复制 MDC，保证 CLI / 工作流 / MCP 日志能按 messageId 串起来。
+        Map<String, String> mdcContext = MDC.getCopyOfContextMap();
+
         // 把工具执行交给独立线程池，主线程只负责等待。
         Future<ToolResult> future;
         try {
-            future = toolExecutor.submit(() -> dispatch(call));
+            future = toolExecutor.submit(() -> dispatchWithMdc(call, mdcContext));
         } catch (RejectedExecutionException e) {
             // 线程池已满时直接失败，不再阻塞 Agent 循环。
             return ToolResult.failed(call.name(), "工具执行队列已满，请稍后再试");
@@ -276,6 +280,25 @@ public class ToolRegistryService {
                 throw exception;
             }
             throw new IllegalStateException(cause);
+        }
+    }
+
+    private ToolResult dispatchWithMdc(ToolCall call, Map<String, String> mdcContext) {
+        // 保存工具线程原来的 MDC，执行结束后恢复，避免线程池复用导致日志串号。
+        Map<String, String> oldContext = MDC.getCopyOfContextMap();
+        try {
+            if (mdcContext == null || mdcContext.isEmpty()) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(mdcContext);
+            }
+            return dispatch(call);
+        } finally {
+            if (oldContext == null || oldContext.isEmpty()) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(oldContext);
+            }
         }
     }
 
