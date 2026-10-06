@@ -326,6 +326,12 @@ public class WorkflowRouterService {
         copyAlias(result, "customerName", "customer");
         copyAlias(result, "customerName", "name");
         copyAlias(result, "timeRange", "time_range");
+        if (blankValue(result.get("customerName"))) {
+            String customerName = parseCustomerName(userText);
+            if (!customerName.isBlank()) {
+                result.put("customerName", customerName);
+            }
+        }
 
         // months 没有直接给出时，从 timeRange 或用户原文里提取。
         if (blankValue(result.get("months"))) {
@@ -375,6 +381,46 @@ public class WorkflowRouterService {
             return 1;
         }
         return null;
+    }
+
+    private String parseCustomerName(String userText) {
+        if (userText == null || userText.isBlank()) {
+            return "";
+        }
+
+        String text = userText.replaceAll("@_user_\\d+", "")
+                .replace("帮我", "")
+                .replace("请", "")
+                .trim();
+
+        String[] patterns = {
+                ".*?(?:查询|查一下|查下|看一下|看下)(.+?)(?:最近|近|过去|本月|今年|客户订单|订单|消费|买了什么).*",
+                ".*?(.+?)(?:最近|近|过去)\\s*\\d{1,2}\\s*个?月.*?(?:客户订单|订单|消费).*",
+                ".*?(?:客户|用户|会员)(.+?)(?:的)?(?:客户订单|订单|消费).*"
+        };
+        for (String pattern : patterns) {
+            Matcher matcher = Pattern.compile(pattern).matcher(text);
+            if (matcher.matches()) {
+                return cleanCustomerName(matcher.group(1));
+            }
+        }
+        return "";
+    }
+
+    private String cleanCustomerName(String name) {
+        if (name == null) {
+            return "";
+        }
+        String value = name.replaceAll("[，,。.!！?？：:；;\\s]", "")
+                .replace("的", "")
+                .replace("客户", "")
+                .replace("用户", "")
+                .replace("会员", "")
+                .trim();
+        if (value.length() < 2 || value.length() > 20) {
+            return "";
+        }
+        return value;
     }
 
     private String candidateNames(List<WorkflowRouteCandidate> candidates) {
