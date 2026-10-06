@@ -145,6 +145,14 @@ public class WorkflowRouterService {
                         rs.getString("description"),
                         routingText));
 
+        log.info("[阶段10 工作流路由] 数据库工作流定义读取：启用数量={}，匹配文本={}",
+                all.size(), routingText);
+        for (WorkflowRouteCandidate candidate : all) {
+            log.info("[阶段10 工作流路由] 工作流定义：workflowCode={}，workflowName={}，intentKeywords={}，description={}，规则分数={}，命中原因={}",
+                    candidate.workflowCode(), candidate.workflowName(), candidate.intentKeywords(),
+                    candidate.description(), candidate.score(), candidate.matchedReasons());
+        }
+
         List<WorkflowRouteCandidate> result = new ArrayList<>();
         for (WorkflowRouteCandidate candidate : all) {
             if (candidate.score() >= MIN_RULE_SCORE) {
@@ -153,6 +161,8 @@ public class WorkflowRouterService {
         }
 
         result.sort(Comparator.comparingInt(WorkflowRouteCandidate::score).reversed());
+        log.info("[阶段10 工作流路由] 规则过滤完成：最低分数={}，候选数量={}，候选={}",
+                MIN_RULE_SCORE, result.size(), candidateNames(result));
         if (result.size() > MAX_CANDIDATE_SIZE) {
             return new ArrayList<>(result.subList(0, MAX_CANDIDATE_SIZE));
         }

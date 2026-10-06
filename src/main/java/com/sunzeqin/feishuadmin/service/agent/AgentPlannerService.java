@@ -81,6 +81,14 @@ public class AgentPlannerService {
         // 打印规划输入摘要，排查提示词和 observation 数量。
         log.info("[阶段3 外层Agent规划] 规划输入：消息ID={}，步骤={}，会话ID={}，观察结果数量={}，用户文本={}",
                 messageId, step, chatId, observations.size(), userText);
+        log.info("[阶段3 外层Agent规划] 本轮上下文：消息ID={}，步骤={}，记忆长度={}，业务Skill长度={}，工具清单长度={}，观察工具={}，可用工具={}",
+                messageId, step,
+                memoryText == null ? 0 : memoryText.length(),
+                ecommerceAgentSkill == null ? 0 : ecommerceAgentSkill.length(),
+                toolRegistry.toolDescriptions().length(),
+                observationTools(observations),
+                toolNames());
+        log.debug("[阶段3 外层Agent规划] 本轮完整Prompt：消息ID={}，步骤={}，Prompt={}", messageId, step, prompt);
 
         // 调用模型。
         String answer;
@@ -114,6 +122,19 @@ public class AgentPlannerService {
 
         // 返回模型决策。
         return decision;
+    }
+
+    private List<String> observationTools(List<ToolResult> observations) {
+        List<String> tools = new ArrayList<>();
+        for (ToolResult observation : observations) {
+            tools.add(observation.tool() + "(success=" + observation.success() + ")");
+        }
+        return tools;
+    }
+
+    private List<String> toolNames() {
+        return List.of("cli.run_skill", "feishu.scope_for_domain", "ecommerce.list_tools",
+                "ecommerce.call_tool", "workflow.list", "workflow.run");
     }
 
     private ChatModel buildChatModel(FeishuProperties properties) {

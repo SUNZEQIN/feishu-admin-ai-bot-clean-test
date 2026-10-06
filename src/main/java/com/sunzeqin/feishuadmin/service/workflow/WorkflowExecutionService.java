@@ -77,12 +77,26 @@ public class WorkflowExecutionService {
 
         log.info("[阶段10 工作流执行] 查询候选工作流：关键词={}，启用数量={}，命中数量={}",
                 keyword, workflows.size(), matched.size());
+        for (WorkflowDefinition workflow : workflows) {
+            log.info("[阶段10 工作流执行] 工作流查询明细：workflowCode={}，workflowName={}，intentKeywords={}，description={}，是否命中={}",
+                    workflow.workflowCode(), workflow.workflowName(), workflow.intentKeywords(),
+                    workflow.description(), containsWorkflow(matched, workflow.workflowCode()));
+        }
 
         return Map.of(
                 "keyword", keyword == null ? "" : keyword,
                 "count", matched.size(),
                 "workflows", matched
         );
+    }
+
+    private boolean containsWorkflow(List<Map<String, Object>> workflows, String workflowCode) {
+        for (Map<String, Object> workflow : workflows) {
+            if (workflowCode.equals(workflow.get("workflowCode"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public Map<String, Object> runWorkflow(String workflowCode, Map<String, Object> arguments) {
