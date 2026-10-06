@@ -166,6 +166,16 @@ public class AgentOrchestratorService {
                 return runResult;
             }
 
+            // 普通工具已经生成最终回复时，也直接结束，避免外层 Agent 再规划一轮导致重复回复和耗时变长。
+            String finalReply = finalReplyFromToolResult(result);
+            if (!finalReply.isBlank()) {
+                log.info("[阶段4 工具调用] 工具已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
+                        event.messageId(), step, result.tool(), finalReply.length());
+                AgentRunResult runResult = new AgentRunResult(result.success(), finalReply);
+                memoryService.saveAssistantMessage(event, runResult.reply());
+                return runResult;
+            }
+
             // 如果工具已经返回授权链接，直接回复用户，不再交给大模型二次解释，避免误说“不支持授权”。
             String authorizeReply = authorizeReplyFromToolResult(result);
             if (!authorizeReply.isBlank()) {
@@ -194,6 +204,27 @@ public class AgentOrchestratorService {
         AgentRunResult result = new AgentRunResult(false, "⚠️ 本次任务步骤过多，已停止执行，避免重复操作。");
         memoryService.saveAssistantMessage(event, result.reply());
         return result;
+    }
+
+    private String finalReplyFromToolResult(ToolResult result) {
+        // 空结果直接返回空字符串。
+        if (result == null || result.data() == null || result.data().isEmpty()) {
+            return "";
+        }
+
+        // 授权链接由 authorizeReplyFromToolResult 单独处理，这里不抢它的分支。
+        if (!authorizeUrlFromToolResult(result).isBlank()) {
+            return "";
+        }
+
+        // 读取工具返回的最终回复。
+        Object finalReply = result.data().get("finalReply");
+        if (finalReply == null || finalReply.toString().isBlank()) {
+            return "";
+        }
+
+        // 返回最终回复。
+        return finalReply.toString();
     }
 
     private AgentRunResult tryRunWorkflow(FeishuMessageEvent event, String memoryText) {

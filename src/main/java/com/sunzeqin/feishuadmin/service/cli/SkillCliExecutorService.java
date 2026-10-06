@@ -126,8 +126,13 @@ public class SkillCliExecutorService {
             return authorizeResult;
         }
 
-        // 思维导图类追问通常已经由外层 Agent 把群聊记忆整理进 goal。
-        // 这里直接创建 Markdown 文档，避免内层模型反复探索 mindnotes/wiki/drive/help 导致超过最大步骤数。
+        // 原生思维导图不能被普通文档冒充。当前 lark-cli 只能操作已有 mindnote 节点，
+        // 没有稳定的新建 mindnote 文件命令时，快速说明边界，避免通用流程反复探索后生成文档。
+        if (shouldStopNativeMindMap(normalizedDomain, goal)) {
+            return nativeMindMapUnsupported(normalizedDomain, goal, sourceChatId);
+        }
+
+        // 文档版思维导图才走 Markdown 文档直达流程，避免内层模型反复探索 mindnotes/wiki/drive/help。
         if (shouldCreateMindMapDocument(normalizedDomain, goal)) {
             return createMindMapDocument(normalizedDomain, goal, sourceChatId, senderOpenId);
         }
@@ -313,6 +318,16 @@ public class SkillCliExecutorService {
             return false;
         }
 
+        // 只有用户明确接受文档版/Markdown/大纲文档时，才创建文档。
+        boolean documentFallbackAccepted = goal.contains("文档版")
+                || goal.contains("文档形式")
+                || goal.contains("大纲文档")
+                || goal.contains("markdown")
+                || goal.contains("Markdown");
+        if (!documentFallbackAccepted) {
+            return false;
+        }
+
         // 用户明确要操作已有节点时，仍交给普通 SkillCLI 流程，避免误建文档。
         if (goal.contains("节点") || goal.contains("node") || goal.contains("mindnote id")) {
             return false;
@@ -322,6 +337,64 @@ public class SkillCliExecutorService {
         return "mindnotes".equals(domain)
                 || "docs".equals(domain)
                 || "markdown".equals(domain);
+    }
+
+    private boolean shouldStopNativeMindMap(String domain, String goal) {
+        // 空目标不处理。
+        if (goal == null || goal.isBlank()) {
+            return false;
+        }
+
+        // 只处理文档/思维导图相关业务域。
+        boolean allowedDomain = "mindnotes".equals(domain)
+                || "docs".equals(domain)
+                || "markdown".equals(domain);
+        if (!allowedDomain) {
+            return false;
+        }
+
+        // 必须是思维导图意图。
+        boolean mindMapIntent = goal.contains("思维导图")
+                || goal.contains("脑图")
+                || goal.contains("思维笔记");
+        if (!mindMapIntent) {
+            return false;
+        }
+
+        // 已经提供已有 mindnote id / 节点任务时，交给普通 CLI 流程。
+        if (goal.contains("节点") || goal.contains("node") || goal.contains("mindnote id")) {
+            return false;
+        }
+
+        // 用户明确接受文档版时，交给文档直达流程。
+        return !(goal.contains("文档版")
+                || goal.contains("文档形式")
+                || goal.contains("大纲文档")
+                || goal.contains("markdown")
+                || goal.contains("Markdown"));
+    }
+
+    private Map<String, Object> nativeMindMapUnsupported(String domain, String goal, String sourceChatId) {
+        String finalReply = """
+                暂时不能直接新建原生飞书思维导图。
+
+                原因：当前 lark-cli 的 mindnotes 能力只支持对已有思维笔记节点进行查询/创建/更新，需要已有的 mindnote id；没有稳定的新建 mindnote 文件命令。
+
+                可以这样继续：
+                1. 你提供一个已有思维笔记的 mindnote id，我再把群聊总结写入这个思维笔记；
+                2. 或者你回复“生成文档版思维导图”，我会用 Markdown 大纲文档承载总结。
+                """.strip();
+
+        log.info("[阶段5 SkillCLI规划] 原生思维导图直达拦截：业务域={}，目标={}，原因=缺少新建mindnote能力",
+                domain, goal);
+
+        return Map.of(
+                "domain", domain,
+                "goal", goal,
+                "sourceChatId", sourceChatId,
+                "finalReply", finalReply,
+                "observations", List.of()
+        );
     }
 
     private Map<String, Object> createMindMapDocument(String domain, String goal,
