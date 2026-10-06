@@ -67,6 +67,7 @@ public class AgentOrchestratorService {
         putMdc("messageId", event.messageId());
         putMdc("chatId", event.chatId());
         putMdc("senderOpenId", event.openId());
+        MDC.put("threadId", String.valueOf(Thread.currentThread().getId()));
         try {
             return runInternal(event);
         } finally {

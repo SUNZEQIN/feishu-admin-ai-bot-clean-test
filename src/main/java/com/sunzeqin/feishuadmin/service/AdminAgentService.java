@@ -8,6 +8,7 @@ import com.sunzeqin.feishuadmin.service.agent.AgentOrchestratorService;
 import com.sunzeqin.feishuadmin.utils.LlmErrorUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -67,14 +68,40 @@ public class AdminAgentService {
      */
     public void handleMessage(FeishuMessageEvent event) {
         // 这里留给同步调用兜底；真实入口会优先调用异步方法。
-        doHandleMessage(event);
+        withMdc(event, () -> doHandleMessage(event));
     }
 
     @Async(FeishuAsyncConfig.FEISHU_AGENT_EXECUTOR)
     public void handleMessageAsync(FeishuMessageEvent event) {
         // 后台异步处理飞书消息，避免飞书回调接口等待 LLM 执行。
         // 指定专用线程池，避免使用无界默认执行器把线程数打满。
-        doHandleMessage(event);
+        withMdc(event, () -> doHandleMessage(event));
+    }
+
+    private void withMdc(FeishuMessageEvent event, Runnable action) {
+        // MDC 默认不会跨线程传递，业务入口统一注入消息和当前线程标识。
+        java.util.Map<String, String> oldContext = MDC.getCopyOfContextMap();
+        try {
+            if (event != null) {
+                putMdc("messageId", event.messageId());
+                putMdc("chatId", event.chatId());
+                putMdc("senderOpenId", event.openId());
+            }
+            MDC.put("threadId", String.valueOf(Thread.currentThread().getId()));
+            action.run();
+        } finally {
+            if (oldContext == null || oldContext.isEmpty()) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(oldContext);
+            }
+        }
+    }
+
+    private void putMdc(String key, String value) {
+        if (value != null && !value.isBlank()) {
+            MDC.put(key, value);
+        }
     }
 
     /**

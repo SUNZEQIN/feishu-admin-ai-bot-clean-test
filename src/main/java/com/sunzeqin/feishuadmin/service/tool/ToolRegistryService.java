@@ -292,6 +292,8 @@ public class ToolRegistryService {
             } else {
                 MDC.setContextMap(mdcContext);
             }
+            // 工具执行已经切换线程，记录真正执行 CLI / MCP 的线程 ID。
+            MDC.put("threadId", String.valueOf(Thread.currentThread().getId()));
             return dispatch(call);
         } finally {
             if (oldContext == null || oldContext.isEmpty()) {

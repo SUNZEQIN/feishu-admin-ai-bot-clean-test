@@ -18,7 +18,7 @@ logging:
   level:
     com.sunzeqin.feishuadmin: ${APP_LOG_LEVEL:INFO}
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %property{PID} --- [%15.15t] [msg=%X{messageId:-}- chat=%X{chatId:-}- wf=%X{workflowCode:-}-] %-40.40logger{39} : %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level %property{PID} --- [%15.15t tid=%X{threadId:-}] [msg=%X{messageId:-} chat=%X{chatId:-} wf=%X{workflowCode:-}] %-40.40logger{39} : %msg%n"
 
 feishu:
   base-url: ${FEISHU_BASE_URL:https://open.feishu.cn}
