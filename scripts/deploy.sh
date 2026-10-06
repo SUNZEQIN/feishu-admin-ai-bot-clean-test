@@ -13,7 +13,6 @@ APP_NAME="${APP_NAME:-$(basename "${APP_DIR}")}"
 CONTAINER_NAME="${CONTAINER_NAME:-${APP_NAME}}"
 NETWORK_NAME="${NETWORK_NAME:-feishu-net}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
-GIT_REPO_URL="${GIT_REPO_URL:-https://github.com/SUNZEQIN/feishu-admin-ai-bot-clean.git}"
 GIT_PROXY_PREFIX="${GIT_PROXY_PREFIX:-}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-120}"
 GIT_SAFE_DIRECTORY_AUTO="${GIT_SAFE_DIRECTORY_AUTO:-true}"
@@ -35,7 +34,11 @@ if [ -d ".git" ]; then
     git config --global --add safe.directory "${APP_DIR}" >/dev/null 2>&1 || true
   fi
 
-  if [ -n "${GIT_PROXY_PREFIX}" ]; then
+  GIT_ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
+  GIT_REPO_URL="${GIT_REPO_URL:-${GIT_ORIGIN_URL}}"
+  if [ -z "${GIT_REPO_URL}" ]; then
+    echo "当前仓库没有 origin，且未配置 GIT_REPO_URL，跳过 git pull。"
+  elif [ -n "${GIT_PROXY_PREFIX}" ]; then
     GIT_PULL_URL="${GIT_PROXY_PREFIX}${GIT_REPO_URL}"
     echo "使用 Git 代理拉取代码：${GIT_PULL_URL}"
     git pull "${GIT_PULL_URL}" "${GIT_BRANCH}"
