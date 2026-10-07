@@ -151,7 +151,8 @@ public class AdminAgentService {
                 return;
             }
 
-            // 如果工具已经用飞书卡片或飞书消息把结果发出，这里只追加一条简短确认，避免用户不知道已经成功。
+            // 只有底层工具返回结构化外发成功标记时，才追加发送确认。
+            // 不能根据大模型最终文本猜测“卡片已发送”，否则只查到数据但没有调用飞书发送接口时也会误报成功。
             if (cardOrMessageAlreadySent(result)) {
                 log.info("[阶段8 回复飞书] 卡片或消息已发送，准备回复简短确认：消息ID={}", event.messageId());
                 safeReplyToSender(event, cardOrMessageSentReply(result));
@@ -472,18 +473,8 @@ public class AdminAgentService {
             return false;
         }
 
-        // 空回复直接跳过。
-        if (result.reply() == null || result.reply().isBlank()) {
-            return true;
-        }
-
-        // 识别“工具已经把飞书卡片或消息发出去”的最终回复。
-        String reply = result.reply();
-        boolean containsSuccess = reply.contains("已") || reply.contains("成功");
-        boolean containsSentMessage = reply.contains("message_id") || reply.contains("发送结果") || reply.contains("发到本群");
-        boolean containsCard = reply.contains("飞书卡片") || reply.contains("卡片");
-
-        return containsSuccess && containsSentMessage && containsCard;
+        // 只相信底层执行结果中的结构化标记，不解析大模型生成的自然语言。
+        return result.externalMessageSent();
     }
 
     private String cardOrMessageSentReply(AgentRunResult result) {

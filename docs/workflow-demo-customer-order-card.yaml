@@ -1,0 +1,43 @@
+workflowCode: ecommerce_customer_order_card_demo
+workflowName: 客户订单卡片总结
+domain: mixed
+enabled: true
+riskLevel: LOW
+requireUserConfirm: false
+intentKeywords:
+  - 查订单
+  - 客户订单
+  - 订单卡片
+  - 整理成卡片
+description: 查询指定客户最近一段时间的订单，汇总消费金额、订单状态和品类偏好，并发送飞书卡片。
+
+steps:
+  - stepNo: 1
+    stepName: 查询客户订单
+    executorType: MCP
+    toolName: ecommerce.query_customer_orders
+    inputTemplate:
+      customerName: "{{customerName}}"
+      months: "{{months|default:12}}"
+    outputKey: orders
+    onError: STOP
+
+  - stepNo: 2
+    stepName: 总结订单数据
+    executorType: LLM_SUMMARY
+    toolName: ""
+    inputTemplate:
+      orders: "{{orders}}"
+      instruction: "总结订单数量、总消费、客单价、订单状态、品类偏好和重点商品"
+    outputKey: summary
+    onError: STOP
+
+  - stepNo: 3
+    stepName: 发送订单卡片
+    executorType: FEISHU_REPLY
+    toolName: feishu.send_card
+    inputTemplate:
+      title: "{{customerName}} · 订单总结"
+      content: "{{summary}}"
+    outputKey: replyResult
+    onError: STOP

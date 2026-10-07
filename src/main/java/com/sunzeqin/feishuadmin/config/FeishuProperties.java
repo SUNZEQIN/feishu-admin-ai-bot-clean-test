@@ -84,7 +84,7 @@ public class FeishuProperties {
     private String cliCommand = "lark-cli";
 
     // Skill + CLI 内部最多执行多少轮。
-    private int cliMaxSteps = 8;
+    private int cliMaxSteps = 15;
 
     // 单条 CLI 命令最大等待秒数。
     private int cliTimeoutSeconds = 60;

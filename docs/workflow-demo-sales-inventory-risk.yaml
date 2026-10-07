@@ -1,0 +1,54 @@
+workflowCode: ecommerce_sales_inventory_risk_demo
+workflowName: 销售库存风险分析
+domain: ecommerce
+enabled: true
+riskLevel: LOW
+requireUserConfirm: false
+intentKeywords:
+  - 销售额排行
+  - 销售额最高
+  - 畅销商品
+  - 库存不足
+  - 库存风险
+  - 补货分析
+description: 查询销售额最高的商品和低库存商品，分析畅销商品库存不足风险，并生成飞书分析卡片。
+
+steps:
+  - stepNo: 1
+    stepName: 查询销售额最高商品
+    executorType: MCP
+    toolName: ecommerce.query_top_products
+    inputTemplate:
+      limit: "{{limit|default:5}}"
+    outputKey: topProducts
+    onError: STOP
+
+  - stepNo: 2
+    stepName: 查询低库存商品
+    executorType: MCP
+    toolName: ecommerce.query_low_inventory
+    inputTemplate:
+      threshold: "{{threshold|default:20}}"
+    outputKey: lowInventoryProducts
+    onError: STOP
+
+  - stepNo: 3
+    stepName: 分析销售库存风险
+    executorType: LLM_SUMMARY
+    toolName: ""
+    inputTemplate:
+      topProducts: "{{topProducts}}"
+      lowInventoryProducts: "{{lowInventoryProducts}}"
+      instruction: "找出同时属于销售额最高商品和低库存商品的交集，分析畅销但库存不足的风险，并给出补货优先级"
+    outputKey: summary
+    onError: STOP
+
+  - stepNo: 4
+    stepName: 发送风险分析卡片
+    executorType: FEISHU_REPLY
+    toolName: feishu.send_card
+    inputTemplate:
+      title: 销售库存风险分析
+      content: "{{summary}}"
+    outputKey: replyResult
+    onError: STOP

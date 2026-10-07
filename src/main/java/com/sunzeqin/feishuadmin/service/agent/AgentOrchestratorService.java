@@ -191,7 +191,8 @@ public class AgentOrchestratorService {
                         event.messageId(), step, result.tool(), workflowReply.length(), firstLine(workflowReply));
                 log.debug("[工作流结果] 最终回复完整内容：消息ID={}，回复={}",
                         event.messageId(), workflowReply);
-                AgentRunResult runResult = new AgentRunResult(true, workflowReply);
+                AgentRunResult runResult = new AgentRunResult(true, workflowReply, "",
+                        externalMessageSentFromToolResult(result));
                 memoryService.saveAssistantMessage(event, runResult.reply());
                 return runResult;
             }
@@ -203,7 +204,8 @@ public class AgentOrchestratorService {
                         event.messageId(), step, result.tool(), finalReply.length(), firstLine(finalReply));
                 log.debug("[工具结果] 最终回复完整内容：消息ID={}，回复={}",
                         event.messageId(), finalReply);
-                AgentRunResult runResult = new AgentRunResult(result.success(), finalReply);
+                AgentRunResult runResult = new AgentRunResult(result.success(), finalReply, "",
+                        externalMessageSentFromToolResult(result));
                 memoryService.saveAssistantMessage(event, runResult.reply());
                 return runResult;
             }
@@ -257,6 +259,19 @@ public class AgentOrchestratorService {
 
         // 返回最终回复。
         return finalReply.toString();
+    }
+
+    /**
+     * 读取工具返回的结构化外发成功标记。
+     *
+     * <p>不能根据大模型回复文本里的“卡片”“已发送”等词推断发送成功，
+     * 只有底层工具明确返回 true 才允许发送层走简短确认分支。</p>
+     */
+    private boolean externalMessageSentFromToolResult(ToolResult result) {
+        if (result == null || result.data() == null) {
+            return false;
+        }
+        return Boolean.TRUE.equals(result.data().get("externalMessageSent"));
     }
 
     private WorkflowAttempt tryRunWorkflow(FeishuMessageEvent event, String memoryText) {

@@ -260,6 +260,25 @@ public class SkillCliExecutorService {
             // 保存执行结果。
             observations.add(commandResult);
 
+            // 飞书消息已经成功发送时，当前 Skill + CLI 任务已经完成。
+            // 不能继续等待模型再生成一次 final_answer，否则命令刚好执行在最大步骤时，
+            // 会被循环末尾误判为「超过最大步骤数」，并把之前失败的卡片 JSON 错误返回给用户。
+            if (isSuccessfulMessageCommand(command, commandResult)) {
+                String finalReply = isInteractiveMessageCommand(command)
+                        ? "已完成：飞书卡片已成功发送。"
+                        : "已完成：飞书消息已成功发送。";
+                log.info("[CLI终态] 消息发送成功，提前结束：业务域={}，步骤={}，命令={}，退出码={}",
+                        normalizedDomain, step, command, commandResult.exitCode());
+                return Map.of(
+                        "domain", normalizedDomain,
+                        "goal", goal,
+                        "sourceChatId", sourceChatId,
+                        "finalReply", finalReply,
+                        "externalMessageSent", true,
+                        "observations", observations
+                );
+            }
+
             // CLI 明确返回缺少用户授权 scope 时，生成授权链接并停止当前任务。
             String missingScopes = extractMissingScopes(commandResult);
             if (!missingScopes.isBlank()) {
@@ -307,6 +326,30 @@ public class SkillCliExecutorService {
             throw new IllegalStateException("Skill + CLI 超过最大步骤数，已停止执行");
         }
         throw new IllegalStateException("Skill + CLI 超过最大步骤数，已停止执行。最后一次失败原因：" + lastFailure);
+    }
+
+    /**
+     * 判断 CLI 是否已经成功完成一条对用户可见的飞书消息发送命令。
+     *
+     * <p>只有消息发送类命令可以直接作为终态，help、查询和配置命令仍然需要继续规划，
+     * 避免把中间步骤误判成整个业务已经完成。</p>
+     */
+    private boolean isSuccessfulMessageCommand(List<String> command, CliCommandResult commandResult) {
+        // 非零退出码明确表示失败，不能提前结束。
+        if (commandResult == null || commandResult.exitCode() != 0 || command == null) {
+            return false;
+        }
+
+        // 只认可 lark-cli im 域的发送和回复命令。
+        return command.contains("+messages-send") || command.contains("+messages-reply");
+    }
+
+    /**
+     * 判断成功发送的消息是否为飞书卡片。
+     */
+    private boolean isInteractiveMessageCommand(List<String> command) {
+        // interactive 是 lark-cli 消息卡片的类型标记。
+        return command != null && command.contains("interactive");
     }
 
     private boolean shouldCreateMindMapDocument(String domain, String goal) {
