@@ -75,12 +75,11 @@ public class ConversationMemoryService {
         // 追加会话记忆内容。
         appendMessages(builder, messages);
 
-        // 打印记忆读取摘要，帮助确认实际注入了哪些历史内容。
+        // 打印完整读取链路，明确数据来源以及最终交给哪个 Agent 组件。
         String memoryText = builder.toString();
-        log.info("会话记忆读取：消息ID={}，范围={}，记忆Key={}，摘要长度={}，近期条数={}，记忆文本长度={}，记忆文本摘要={}",
+        log.info("会话记忆读取完成：消息ID={}，读取表=[agent_conversation_summary,agent_conversation_memory]，范围={}，记忆Key={}，读取给=AgentOrchestratorService->AgentPlannerService/LLM，摘要长度={}，近期条数={}，记忆文本长度={}，完整记忆文本=\n{}",
                 event.messageId(), scope, memoryKey, summary.length(), messages.size(),
-                memoryText.length(), preview(memoryText));
-        log.debug("会话记忆读取完整内容：消息ID={}，记忆文本={}", event.messageId(), memoryText);
+                memoryText.length(), memoryText);
 
         // 返回历史记忆文本。
         return memoryText;
@@ -155,10 +154,9 @@ public class ConversationMemoryService {
         // 如果消息超过阈值，把旧消息压缩进摘要。
         compressOldMessages(scope, memoryKey, safe(event.chatId()));
 
-        // 打印记忆写入摘要，区分用户消息和机器人回复，并确认实际写入内容。
-        log.info("会话记忆写入：消息ID={}，范围={}，记忆Key={}，角色={}，内容长度={}，内容摘要={}",
-                event.messageId(), scope, memoryKey, role, content.length(), preview(content));
-        log.debug("会话记忆写入完整内容：消息ID={}，角色={}，内容={}", event.messageId(), role, content);
+        // 打印完整写入链路，明确写入表、字段、用途以及实际内容。
+        log.info("会话记忆写入完成：消息ID={}，写入表=agent_conversation_memory，写入字段=[memory_scope,memory_key,chat_id,user_open_id,user_id,role,content,created_at]，范围={}，记忆Key={}，角色={}，写入用途=供后续AgentOrchestratorService读取并注入AgentPlannerService/LLM，完整写入内容=\n{}",
+                event.messageId(), scope, memoryKey, role, content);
     }
 
     private void compressOldMessages(String scope, String memoryKey, String chatId) {
@@ -202,9 +200,9 @@ public class ConversationMemoryService {
         // 删除已经压缩的旧消息。
         deleteCompressedRows(rows);
 
-        // 打印压缩日志。
-        log.info("会话记忆压缩：范围={}，记忆Key={}，本次压缩条数={}，摘要长度={}",
-                scope, memoryKey, rows.size(), newSummary.length());
+        // 打印摘要表写入和原始消息删除结果，方便核对压缩后的数据去向。
+        log.info("会话记忆压缩完成：写入表=agent_conversation_summary，删除表=agent_conversation_memory，范围={}，记忆Key={}，本次压缩条数={}，摘要长度={}，完整摘要=\n{}",
+                scope, memoryKey, rows.size(), newSummary.length(), newSummary);
     }
 
     private List<MemoryRow> readOldestRows(String scope, String memoryKey, int limit) {
@@ -357,20 +355,6 @@ public class ConversationMemoryService {
     private String safe(String value) {
         // 空字符串保护，避免数据库 NOT NULL 字段写入 null。
         return value == null ? "" : value;
-    }
-
-    private String preview(String value) {
-        // INFO 只保留有限长度并压缩换行，完整内容通过 DEBUG 查看。
-        if (value == null || value.isBlank()) {
-            return "";
-        }
-
-        String normalized = value.replaceAll("\\s+", " ").trim();
-        int maxLength = 500;
-        if (normalized.length() <= maxLength) {
-            return normalized;
-        }
-        return normalized.substring(0, maxLength) + "...";
     }
 
     private Instant toInstant(Timestamp timestamp) {

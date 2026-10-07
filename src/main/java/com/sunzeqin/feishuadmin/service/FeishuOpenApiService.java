@@ -341,7 +341,7 @@ public class FeishuOpenApiService {
         // 如果 token 已存在且距离过期还有 60 秒以上，就直接复用缓存。
         if (!tenantAccessToken.isBlank() && Instant.now().isBefore(tokenExpiresAt.minusSeconds(60))) {
             // 打印 token 缓存命中日志，不打印 token 明文。
-            log.info("[工具调用] 飞书token缓存命中：过期时间={}", tokenExpiresAt);
+            log.debug("[工具调用] 飞书token缓存命中：过期时间={}", tokenExpiresAt);
             return tenantAccessToken;
         }
 

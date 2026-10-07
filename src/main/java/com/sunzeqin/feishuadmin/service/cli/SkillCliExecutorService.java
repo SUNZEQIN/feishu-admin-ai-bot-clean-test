@@ -21,6 +21,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
@@ -71,6 +73,9 @@ public class SkillCliExecutorService {
 
     // 飞书 CLI 原生 Skill 缓存，避免每个规划步骤重复启动 lark-cli 读取同一份文档。
     private final Map<String, String> nativeSkillCache = new ConcurrentHashMap<>();
+
+    // 已经写入 lark-cli token store 的 token 指纹，避免同一应用 token 被重复写入。
+    private final Map<String, String> cliTenantTokenFingerprints = new ConcurrentHashMap<>();
 
     // CLI 内部规划器使用的大模型。
     private final ChatModel chatModel;
@@ -1074,7 +1079,7 @@ public class SkillCliExecutorService {
         if (!hasAs) {
             command.add("--as");
             command.add("bot");
-            log.info("[CLI执行] 身份参数已补充：身份=bot，原因=管理员机器人项目默认使用bot身份");
+            log.debug("[CLI执行] 身份参数已补充：身份=bot，原因=管理员机器人项目默认使用bot身份");
         }
     }
 
@@ -1100,7 +1105,7 @@ public class SkillCliExecutorService {
 
         // 条件二：调用人已经有覆盖当前业务域的用户 token。
         if (hasUserTokenForDomain(senderOpenId, domain)) {
-            log.info("[CLI执行] 身份参数保留user：用户openId={}，业务域={}，原因=已有覆盖该业务域的用户token",
+            log.debug("[CLI执行] 身份参数保留user：用户openId={}，业务域={}，原因=已有覆盖该业务域的用户token",
                     senderOpenId, domain);
             return true;
         }
@@ -1214,8 +1219,8 @@ public class SkillCliExecutorService {
             // 执行业务 CLI 前，先准备对应身份的 token，后续会显式注入到子进程环境。
             CliTokenContext tokenContext = prepareAccessTokenForCli(command, senderOpenId);
 
-            // 打印 CLI 执行入参。
-            log.info("[CLI执行] 执行命令：命令={}", command);
+            // 命令准备信息放到 DEBUG，INFO 只保留命令最终结果。
+            log.debug("[CLI执行] 准备执行命令：命令={}", command);
 
             // 创建 CLI 进程。业务命令会使用受控环境，明确注入当前身份 token。
             Process process = buildProcess(command, tokenContext).start();
@@ -1246,9 +1251,9 @@ public class SkillCliExecutorService {
             // 读取退出码。
             int exitCode = process.exitValue();
 
-            // 打印 CLI 执行结果。
-            log.info("[CLI结果] 命令结果摘要：命令={}，退出码={}，标准输出长度={}，错误输出长度={}，标准输出摘要={}，错误输出摘要={}",
-                    command, exitCode, length(stdout), length(stderr), firstLine(stdout), firstLine(stderr));
+            // 每条 CLI 命令只保留一条 INFO 最终结果。
+            log.info("[CLI结果] 命令执行结果：命令={}，success={}，退出码={}，标准输出长度={}，错误输出长度={}，标准输出摘要={}，错误输出摘要={}",
+                    command, exitCode == 0, exitCode, length(stdout), length(stderr), firstLine(stdout), firstLine(stderr));
             log.debug("[CLI结果] 命令原始输出：命令={}，退出码={}，标准输出={}，错误输出={}",
                     command, exitCode, stdout, stderr);
 
@@ -1288,7 +1293,7 @@ public class SkillCliExecutorService {
             if (token == null) {
                 throw new IllegalStateException("用户尚未授权或用户token不可用，请先完成用户授权");
             }
-            log.info("[CLI执行] 用户token准备完成：用户openId={}，过期时间={}，scope={}",
+            log.debug("[CLI执行] 用户token准备完成：用户openId={}，过期时间={}，scope={}",
                     senderOpenId, token.expiresAt(), token.scopeText());
             return new CliTokenContext("user", token.accessToken());
         }
@@ -1304,8 +1309,8 @@ public class SkillCliExecutorService {
             throw new IllegalStateException("写入 lark-cli tenant_access_token 失败：tenant_access_token 为空");
         }
 
-        // 把 token 写入 lark-cli 的本地 token store，兼容需要读取 credential-store 的命令。
-        setTenantAccessToken(token);
+        // 只有 token 发生变化时才写入 lark-cli 的本地 token store。
+        setTenantAccessTokenIfChanged(token);
 
         // 返回 token，后续会直接注入到业务命令环境变量里，避免 lark-cli 找不到 bot token。
         return new CliTokenContext("bot", token);
@@ -1369,7 +1374,15 @@ public class SkillCliExecutorService {
         return true;
     }
 
-    private void setTenantAccessToken(String token) {
+    private synchronized void setTenantAccessTokenIfChanged(String token) {
+        String appId = properties.getAppId();
+        String tokenFingerprint = tokenFingerprint(token);
+        String previousFingerprint = cliTenantTokenFingerprints.get(appId);
+        if (tokenFingerprint.equals(previousFingerprint)) {
+            log.debug("[CLI执行] tenant_access_token已写入，跳过重复写入：appId={}", appId);
+            return;
+        }
+
         // 组装写入 token 的 lark-cli 命令，token 通过 stdin 传入，不出现在命令行和日志里。
         List<String> command = List.of(
                 properties.getCliCommand(),
@@ -1382,7 +1395,7 @@ public class SkillCliExecutorService {
 
         try {
             // 打印写入动作，不打印 token 明文。
-            log.info("[CLI执行] 写入tenant_access_token：appId={}，命令={}", properties.getAppId(), command);
+            log.debug("[CLI执行] 写入tenant_access_token：appId={}，命令={}", properties.getAppId(), command);
 
             // 创建写入 token 的进程。
             Process process = new ProcessBuilder(command).start();
@@ -1420,10 +1433,25 @@ public class SkillCliExecutorService {
             }
 
             // 打印写入成功日志，不打印 token。
-            log.info("[CLI执行] 写入tenant_access_token成功：appId={}，退出码={}", properties.getAppId(), exitCode);
+            log.debug("[CLI执行] 写入tenant_access_token成功：appId={}，退出码={}", properties.getAppId(), exitCode);
+            cliTenantTokenFingerprints.put(appId, tokenFingerprint);
         } catch (Exception e) {
             // 写入 token 失败时抛出异常。
             throw new IllegalStateException("写入 lark-cli tenant_access_token 异常：" + e.getMessage(), e);
+        }
+    }
+
+    private String tokenFingerprint(String token) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                builder.append(String.format("%02x", value));
+            }
+            return builder.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("计算 tenant_access_token 指纹失败", e);
         }
     }
 
@@ -1471,7 +1499,7 @@ public class SkillCliExecutorService {
         environment.put("LARKSUITE_CLI_NO_UPDATE_NOTIFIER", "1");
 
         // 打印受控环境说明，不打印密钥和 token。
-        log.info("[CLI执行] 业务命令环境已调整：appId={}，默认身份={}，已注入对应身份token，已启用严格模式",
+        log.debug("[CLI执行] 业务命令环境已调整：appId={}，默认身份={}，已注入对应身份token，已启用严格模式",
                 properties.getAppId(), tokenContext.identity());
 
         // 返回处理后的进程构造器。
