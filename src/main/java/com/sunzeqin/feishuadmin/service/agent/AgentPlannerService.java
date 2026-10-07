@@ -69,14 +69,14 @@ public class AgentPlannerService {
     }
 
     public AgentDecision decide(String messageId, int step, String userText, String chatId,
-            String memoryText, List<ToolResult> observations) {
+            String memoryText, List<ToolResult> observations, boolean workflowRouteChecked) {
         // LLM 没启用时不应该调用这个方法。
         if (chatModel == null) {
             return new AgentDecision("final_answer", "LLM 未启用", null, "LLM 未启用");
         }
 
         // 构造 Agent 提示词。
-        String prompt = buildPrompt(userText, chatId, memoryText, observations);
+        String prompt = buildPrompt(userText, chatId, memoryText, observations, workflowRouteChecked);
 
         // 打印规划输入摘要，排查提示词和 observation 数量。
         log.debug("[Agent规划] 规划输入：消息ID={}，步骤={}，会话ID={}，观察结果数量={}，记忆长度={}，业务Skill长度={}，工具清单长度={}，观察工具={}，可用工具={}，用户文本={}",
@@ -157,7 +157,8 @@ public class AgentPlannerService {
                 .build();
     }
 
-    private String buildPrompt(String userText, String chatId, String memoryText, List<ToolResult> observations) {
+    private String buildPrompt(String userText, String chatId, String memoryText, List<ToolResult> observations,
+            boolean workflowRouteChecked) {
         // 把历史工具结果转成 JSON 字符串。
         String observationText = jsonUtils.write(observations);
 
@@ -197,20 +198,24 @@ public class AgentPlannerService {
                   "finalReply": "回复给用户的中文文本"
                 }
 
+                工作流预检查状态：
+                %s
+
                 工具选择规则：
-                1. 如果用户目标像常用业务流程，优先调用 workflow.list 查询可配置工作流；命中后调用 workflow.run 执行。
-                2. 如果用户目标是电商业务数据查询、分析、复盘、库存、订单、退款、客户画像，且没有合适工作流，再使用电商 MCP 工具。
-                3. 如果用户目标涉及飞书内部操作，统一调用 cli.run_skill，不要调用固定 OpenAPI 工具。
-                4. 飞书内部操作包括：群聊、消息、云文档、多维表格、日程、会议、审批、考勤、通讯录、云盘、知识库、妙记、任务等。
-                5. cli.run_skill 是飞书能力执行器，不是最终回复；它会读取本地 Skill，先查 lark-cli help/schema，再执行 CLI。
-                6. 调用 cli.run_skill 时，domain 要按业务选择：群聊和消息用 im，多维表格用 base，云文档用 docs，日程用 calendar，会议用 vc，妙记用 minutes，会议纪要用 note，通讯录用 contact，审批用 approval，考勤/打卡/请假余额/班次用 attendance，云盘/权限/评论用 drive，知识库用 wiki，Markdown 文档用 markdown，思维笔记用 mindnotes，画板用 whiteboard。
-                7. 调用 cli.run_skill 时，goal 必须保留用户完整目标，sourceChatId 必须传当前群 chatId；系统会自动补充 originalMessageId、senderOpenId、senderUserId。
-                8. 当前群 chatId 就是本次飞书事件所在群。用户在群聊里说“本群”“当前群”“群里”“这个群”，都默认指当前群 chatId。
-                9. 不要编造用户 ID、机器人 appId、群 ID、文档 token、表格 token。缺少信息时，优先通过 cli.run_skill 让 lark-cli 查询；确实查不到时再 final_answer 说明原因。
-                10. 飞书操作默认走机器人身份。只有用户原话明确说“用我的身份”“以本人身份”“以用户身份”时，goal 里才允许写用户身份；否则不要主动要求 user 授权。
-                11. 当前业务时区固定为 Asia/Shanghai；当前日期是 %s，“今天”=%s，“明天”=%s，“后天”=%s。
-                12. 用户说“明天下午3点”时，goal 里必须保留为“明天 15:00 Asia/Shanghai”，不要把历史记忆里的旧日期写成绝对日期。
-                13. 调用 workflow.run 时，workflowCode 必须来自 workflow.list 结果或用户明确指定；arguments 必须包含用户目标里的关键参数，例如 customerName、months。
+                1. 如果 Java 工作流预检查未完成，且用户目标像常用业务流程，优先调用 workflow.list 查询可配置工作流；命中后调用 workflow.run 执行。
+                2. 如果 Java 已完成工作流预检查且没有召回候选，不要再次调用 workflow.list，直接判断是否使用电商 MCP 或飞书 CLI。
+                3. 如果用户目标是电商业务数据查询、分析、复盘、库存、订单、退款、客户画像，且没有合适工作流，再使用电商 MCP 工具。
+                4. 如果用户目标涉及飞书内部操作，统一调用 cli.run_skill，不要调用固定 OpenAPI 工具。
+                5. 飞书内部操作包括：群聊、消息、云文档、多维表格、日程、会议、审批、考勤、通讯录、云盘、知识库、妙记、任务等。
+                6. cli.run_skill 是飞书能力执行器，不是最终回复；它会读取本地 Skill，先查 lark-cli help/schema，再执行 CLI。
+                7. 调用 cli.run_skill 时，domain 要按业务选择：群聊和消息用 im，多维表格用 base，云文档用 docs，日程用 calendar，会议用 vc，妙记用 minutes，会议纪要用 note，通讯录用 contact，审批用 approval，考勤/打卡/请假余额/班次用 attendance，云盘/权限/评论用 drive，知识库用 wiki，Markdown 文档用 markdown，思维笔记用 mindnotes，画板用 whiteboard。
+                8. 调用 cli.run_skill 时，goal 必须保留用户完整目标，sourceChatId 必须传当前群 chatId；系统会自动补充 originalMessageId、senderOpenId、senderUserId。
+                9. 当前群 chatId 就是本次飞书事件所在群。用户在群聊里说“本群”“当前群”“群里”“这个群”，都默认指当前群 chatId。
+                10. 不要编造用户 ID、机器人 appId、群 ID、文档 token、表格 token。缺少信息时，优先通过 cli.run_skill 让 lark-cli 查询；确实查不到时再 final_answer 说明原因。
+                11. 飞书操作默认走机器人身份。只有用户原话明确说“用我的身份”“以本人身份”“以用户身份”时，goal 里才允许写用户身份；否则不要主动要求 user 授权。
+                12. 当前业务时区固定为 Asia/Shanghai；当前日期是 %s，“今天”=%s，“明天”=%s，“后天”=%s。
+                13. 用户说“明天下午3点”时，goal 里必须保留为“明天 15:00 Asia/Shanghai”，不要把历史记忆里的旧日期写成绝对日期。
+                14. 调用 workflow.run 时，workflowCode 必须来自 workflow.list 结果或用户明确指定；arguments 必须包含用户目标里的关键参数，例如 customerName、months。
 
                 电商 MCP Skill：
                 %s
@@ -226,7 +231,10 @@ public class AgentPlannerService {
 
                 已有 observations：
                 %s
-                """.formatted(today, today, tomorrow, dayAfterTomorrow,
+                """.formatted(workflowRouteChecked
+                        ? "Java 已完成工作流规则预检查，但没有召回候选工作流；本轮禁止调用 workflow.list。"
+                        : "Java 工作流规则预检查未完成或发生异常；如用户目标像常用业务流程，可以调用 workflow.list。",
+                today, today, tomorrow, dayAfterTomorrow,
                 ecommerceAgentSkill, chatId,
                 memoryText == null || memoryText.isBlank() ? "无" : memoryText,
                 userText, toolRegistry.toolDescriptions(), observationText);

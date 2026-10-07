@@ -108,10 +108,11 @@ public class AgentOrchestratorService {
         List<ToolResult> observations = new ArrayList<>();
 
         // 在通用大模型规划前先尝试命中可配置工作流。
-        AgentRunResult workflowRunResult = tryRunWorkflow(event, memoryText);
-        if (workflowRunResult != null) {
-            return workflowRunResult;
+        WorkflowAttempt workflowAttempt = tryRunWorkflow(event, memoryText);
+        if (workflowAttempt.result() != null) {
+            return workflowAttempt.result();
         }
+        boolean workflowRouteChecked = workflowAttempt.routeChecked();
 
         // 最多执行 MAX_STEPS 轮。
         for (int step = 1; step <= MAX_STEPS; step++) {
@@ -121,7 +122,7 @@ public class AgentOrchestratorService {
 
             // 让 LLM 基于当前 observations 决定下一步。
             AgentDecision decision = planner.decide(event.messageId(), step, event.text(), event.chatId(),
-                    memoryText, observations);
+                    memoryText, observations, workflowRouteChecked);
 
             // 打印当前轮规划结果。
             log.debug("[Agent规划] 步骤决策：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}，最终回复长度={}",
@@ -134,9 +135,11 @@ public class AgentOrchestratorService {
 
             // 如果 LLM 输出最终回复，就结束循环。
             if (!decision.toolCallDecision()) {
-                // 打印最终回复日志。
-                log.debug("[Agent规划] 生成最终回复：消息ID={}，步骤={}，回复长度={}",
-                        event.messageId(), step, decision.finalReply() == null ? 0 : decision.finalReply().length());
+                // 最终回复属于链路关键结果，INFO 保留摘要，完整正文放到 DEBUG。
+                log.info("[Agent结果] 生成最终回复：消息ID={}，步骤={}，回复长度={}，回复摘要={}",
+                        event.messageId(), step, textLength(decision.finalReply()), firstLine(decision.finalReply()));
+                log.debug("[Agent结果] 最终回复完整内容：消息ID={}，回复={}",
+                        event.messageId(), decision.finalReply());
                 AgentRunResult result = new AgentRunResult(true, decision.finalReply());
                 memoryService.saveAssistantMessage(event, result.reply());
                 return result;
@@ -153,6 +156,19 @@ public class AgentOrchestratorService {
 
             // 注入当前飞书事件上下文，方便工具引用原消息和@触发人。
             ToolCall toolCall = enrichToolCall(event, decision.toolCall());
+
+            // Java 已完成工作流预检查且没有候选时，禁止模型重复查询 workflow.list。
+            // 这里做代码级拦截，不能只依赖提示词约束，避免重复数据库查询。
+            if (workflowRouteChecked && "workflow.list".equals(toolCall.name())) {
+                log.warn("[工作流路由] 已拦截重复查询：消息ID={}，步骤={}，原因=Java预检查未召回候选工作流",
+                        event.messageId(), step);
+                ToolResult blockedResult = ToolResult.success(
+                        toolCall.name(),
+                        "Java 已完成工作流预检查且没有候选，禁止重复查询 workflow.list，请改用电商 MCP 或飞书 CLI",
+                        Map.of("count", 0, "blockedByJavaRoute", true, "workflows", List.of()));
+                observations.add(blockedResult);
+                continue;
+            }
 
             // 打印工具执行前日志。
             log.debug("[工具调用] 准备执行工具：消息ID={}，步骤={}，工具={}，入参={}",
@@ -171,8 +187,10 @@ public class AgentOrchestratorService {
             // 工作流执行完成后，如果已经生成最终回复，就直接结束，避免再让 LLM 复述一轮。
             String workflowReply = workflowReplyFromToolResult(result);
             if (!workflowReply.isBlank()) {
-                log.debug("[工作流执行] 工作流已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
-                        event.messageId(), step, result.tool(), workflowReply.length());
+                log.info("[工作流结果] 工作流已生成最终回复：消息ID={}，步骤={}，工具={}，回复长度={}，回复摘要={}",
+                        event.messageId(), step, result.tool(), workflowReply.length(), firstLine(workflowReply));
+                log.debug("[工作流结果] 最终回复完整内容：消息ID={}，回复={}",
+                        event.messageId(), workflowReply);
                 AgentRunResult runResult = new AgentRunResult(true, workflowReply);
                 memoryService.saveAssistantMessage(event, runResult.reply());
                 return runResult;
@@ -181,8 +199,10 @@ public class AgentOrchestratorService {
             // 普通工具已经生成最终回复时，也直接结束，避免外层 Agent 再规划一轮导致重复回复和耗时变长。
             String finalReply = finalReplyFromToolResult(result);
             if (!finalReply.isBlank()) {
-                log.debug("[工具调用] 工具已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
-                        event.messageId(), step, result.tool(), finalReply.length());
+                log.info("[工具结果] 工具已生成最终回复：消息ID={}，步骤={}，工具={}，回复长度={}，回复摘要={}",
+                        event.messageId(), step, result.tool(), finalReply.length(), firstLine(finalReply));
+                log.debug("[工具结果] 最终回复完整内容：消息ID={}，回复={}",
+                        event.messageId(), finalReply);
                 AgentRunResult runResult = new AgentRunResult(result.success(), finalReply);
                 memoryService.saveAssistantMessage(event, runResult.reply());
                 return runResult;
@@ -239,7 +259,7 @@ public class AgentOrchestratorService {
         return finalReply.toString();
     }
 
-    private AgentRunResult tryRunWorkflow(FeishuMessageEvent event, String memoryText) {
+    private WorkflowAttempt tryRunWorkflow(FeishuMessageEvent event, String memoryText) {
         // 工作流路由失败不能影响原有 Agent 链路，异常时回退到通用规划。
         WorkflowRouteResult routeResult;
         try {
@@ -247,14 +267,14 @@ public class AgentOrchestratorService {
         } catch (Exception e) {
             log.warn("[工作流路由] 路由异常，回退到外层Agent规划：消息ID={}，错误={}",
                     event.messageId(), e.getMessage());
-            return null;
+            return new WorkflowAttempt(null, false);
         }
 
         // 未命中时走原来的 Agent 规划。
         if (routeResult == null || !routeResult.matched()) {
             log.info("[工作流路由] 未命中工作流，继续外层Agent规划：消息ID={}，原因={}",
                     event.messageId(), routeResult == null ? "路由结果为空" : routeResult.reason());
-            return null;
+            return new WorkflowAttempt(null, true);
         }
 
         // 命中工作流后直接调用 workflow.run，不再让外层 LLM 二次选择。
@@ -273,19 +293,22 @@ public class AgentOrchestratorService {
         if (!result.success()) {
             AgentRunResult runResult = new AgentRunResult(false, "⚠️ 执行失败\n\n🔎 原因：" + result.message());
             memoryService.saveAssistantMessage(event, runResult.reply());
-            return runResult;
+            return new WorkflowAttempt(runResult, true);
         }
 
         String workflowReply = workflowReplyFromToolResult(result);
         if (!workflowReply.isBlank()) {
             AgentRunResult runResult = new AgentRunResult(true, workflowReply);
             memoryService.saveAssistantMessage(event, runResult.reply());
-            return runResult;
+            return new WorkflowAttempt(runResult, true);
         }
 
         AgentRunResult runResult = new AgentRunResult(true, "✅ 工作流执行完成：" + routeResult.workflowCode());
         memoryService.saveAssistantMessage(event, runResult.reply());
-        return runResult;
+        return new WorkflowAttempt(runResult, true);
+    }
+
+    private record WorkflowAttempt(AgentRunResult result, boolean routeChecked) {
     }
 
     private String authorizeReplyFromToolResult(ToolResult result) {
@@ -373,6 +396,18 @@ public class AgentOrchestratorService {
         if (value != null && !value.isBlank()) {
             params.put(key, value);
         }
+    }
+
+    private int textLength(String value) {
+        return value == null ? 0 : value.length();
+    }
+
+    private String firstLine(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 160 ? normalized : normalized.substring(0, 160) + "...";
     }
 
     private boolean containsMemorySection(String memoryText, String sectionName) {
