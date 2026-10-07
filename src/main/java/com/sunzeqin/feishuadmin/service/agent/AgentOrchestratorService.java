@@ -33,7 +33,7 @@ public class AgentOrchestratorService {
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorService.class);
 
     // 最大循环步数，防止模型无限调用工具。
-    private static final int MAX_STEPS = 10;
+    private static final int MAX_STEPS = 15;
 
     // Agent 规划器。
     private final AgentPlannerService planner;

@@ -340,6 +340,11 @@ public class SkillCliExecutorService {
             return false;
         }
 
+        // +messages-send/+messages-reply --help 只是读取命令帮助，绝对不能当成已发送。
+        if (command.contains("--help") || command.contains("-h")) {
+            return false;
+        }
+
         // 只认可 lark-cli im 域的发送和回复命令。
         return command.contains("+messages-send") || command.contains("+messages-reply");
     }
