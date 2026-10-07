@@ -9,19 +9,27 @@ package com.sunzeqin.feishuadmin.pojo.agent;
  * @param reply        回复给飞书用户的文本
  * @param authorizeUrl 授权链接，非空时发送层会转成二维码
  * @param externalMessageSent 是否已经由工具真实发送了飞书消息或卡片
+ * @param externalMessageType 已发送消息类型：card 或 message
  *
  * @author sunzeqin
  */
-public record AgentRunResult(boolean success, String reply, String authorizeUrl, boolean externalMessageSent) {
+public record AgentRunResult(boolean success, String reply, String authorizeUrl,
+                             boolean externalMessageSent, String externalMessageType) {
 
     public AgentRunResult(boolean success, String reply) {
         // 普通结果没有授权链接。
-        this(success, reply, "", false);
+        this(success, reply, "", false, "");
     }
 
     public AgentRunResult(boolean success, String reply, String authorizeUrl) {
         // 兼容授权结果构造方式；授权二维码仍由发送层负责发送。
-        this(success, reply, authorizeUrl, false);
+        this(success, reply, authorizeUrl, false, "");
+    }
+
+    public AgentRunResult(boolean success, String reply, String authorizeUrl,
+                          boolean externalMessageSent) {
+        // 兼容外发成功标记构造方式，默认不区分消息类型。
+        this(success, reply, authorizeUrl, externalMessageSent, "");
     }
 
     public AgentRunResult {
@@ -30,5 +38,6 @@ public record AgentRunResult(boolean success, String reply, String authorizeUrl,
 
         // authorizeUrl 为空时转成空字符串。
         authorizeUrl = authorizeUrl == null ? "" : authorizeUrl;
+        externalMessageType = externalMessageType == null ? "" : externalMessageType;
     }
 }

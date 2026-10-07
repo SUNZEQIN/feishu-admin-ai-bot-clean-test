@@ -275,6 +275,7 @@ public class SkillCliExecutorService {
                         "sourceChatId", sourceChatId,
                         "finalReply", finalReply,
                         "externalMessageSent", true,
+                        "externalMessageType", isInteractiveMessageCommand(command) ? "card" : "message",
                         "observations", observations
                 );
             }
@@ -883,7 +884,7 @@ public class SkillCliExecutorService {
                 19. 如果某条列表命令已经带 --page-all 并且退出码为 0，不要再用相同 page-token 重复拉取同一页；应该基于已有结果继续下一步。
                 20. 不要重复执行 observations 中已经成功执行过的完全相同命令。
                 21. 对“整理聊天成文档并发送”这类任务，读取群消息成功后要尽快创建文档并发送链接，不要反复读取技能说明或重复分页。
-                22. 发送飞书卡片或重要结果到当前群时，优先使用 im +messages-reply 引用 originalMessageId，而不是普通 send。
+                22. 只有用户明确要求“飞书卡片”或“卡片”时，才发送 interactive 卡片；普通“回复”“汇总”“生成飞书回复”默认发送文本或 Markdown。发送消息时优先使用 im +messages-reply 引用 originalMessageId，而不是普通 send。
                 23. 群聊里发送文本、Markdown、卡片时，内容开头要 @ senderOpenId 对应的人。
                 24. 如果命令支持 --message-id、--message-id-type、--receive-id 等参数，要优先用 originalMessageId 完成“引用原文回复”。
                 25. 如果用户明确要求用户身份，且 CLI 返回 missing_scope / authorization / scope 不足，不要编造成功，直接 final_answer 说明缺少 scope。

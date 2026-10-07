@@ -486,8 +486,13 @@ public class AdminAgentService {
             return "✅ 飞书卡片已发送成功，请到对应私聊查看。";
         }
 
-        // 默认确认发送成功。
-        return "✅ 飞书卡片已发送成功。";
+        // 只有明确标记为卡片时，才使用“卡片”这个说法。
+        if ("card".equalsIgnoreCase(result.externalMessageType())) {
+            return "✅ 飞书卡片已发送成功。";
+        }
+
+        // 普通文本或 Markdown 统一称为飞书消息，避免误报卡片。
+        return "✅ 飞书消息已发送成功。";
     }
 
     private String cleanReplyText(String text) {

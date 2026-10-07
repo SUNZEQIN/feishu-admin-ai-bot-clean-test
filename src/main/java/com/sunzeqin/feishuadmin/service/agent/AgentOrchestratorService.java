@@ -205,7 +205,7 @@ public class AgentOrchestratorService {
                 log.debug("[工具结果] 最终回复完整内容：消息ID={}，回复={}",
                         event.messageId(), finalReply);
                 AgentRunResult runResult = new AgentRunResult(result.success(), finalReply, "",
-                        externalMessageSentFromToolResult(result));
+                        externalMessageSentFromToolResult(result), externalMessageTypeFromToolResult(result));
                 memoryService.saveAssistantMessage(event, runResult.reply());
                 return runResult;
             }
@@ -272,6 +272,14 @@ public class AgentOrchestratorService {
             return false;
         }
         return Boolean.TRUE.equals(result.data().get("externalMessageSent"));
+    }
+
+    private String externalMessageTypeFromToolResult(ToolResult result) {
+        if (result == null || result.data() == null) {
+            return "";
+        }
+        Object value = result.data().get("externalMessageType");
+        return value == null ? "" : value.toString();
     }
 
     private WorkflowAttempt tryRunWorkflow(FeishuMessageEvent event, String memoryText) {
