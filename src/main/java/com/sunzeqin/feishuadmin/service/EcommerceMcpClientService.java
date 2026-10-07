@@ -52,7 +52,7 @@ public class EcommerceMcpClientService {
         ensureEnabled();
 
         // 打印请求摘要。
-        log.info("[阶段4 工具调用] 电商MCP查询工具列表：baseUrl={}", properties.getEcommerceMcpBaseUrl());
+        log.info("[电商MCP] 查询工具列表：baseUrl={}", properties.getEcommerceMcpBaseUrl());
 
         // 请求电商 MCP 工具列表。
         @SuppressWarnings("unchecked")
@@ -66,8 +66,8 @@ public class EcommerceMcpClientService {
                 .body(Map.class);
 
         // 打印响应摘要。
-        log.info("[阶段4 工具调用] 电商MCP工具列表返回：字段={}", response == null ? "空响应" : response.keySet());
-        log.debug("[阶段4 工具调用] 电商MCP工具列表完整响应：{}", response);
+        log.info("[电商MCP] 工具列表返回：字段={}", response == null ? "空响应" : response.keySet());
+        log.debug("[电商MCP] 工具列表完整响应：{}", response);
 
         // 返回响应。
         return response == null ? Map.of() : response;
@@ -84,7 +84,7 @@ public class EcommerceMcpClientService {
         );
 
         // 打印请求摘要。
-        log.info("[阶段4 工具调用] 电商MCP调用工具：baseUrl={}，工具名称={}，入参={}",
+        log.info("[电商MCP] 调用工具：baseUrl={}，工具名称={}，入参={}",
                 properties.getEcommerceMcpBaseUrl(), toolName, arguments);
 
         // 调用电商 MCP 工具。
@@ -101,9 +101,12 @@ public class EcommerceMcpClientService {
                 .body(Map.class);
 
         // 打印响应摘要。
-        log.info("[阶段4 工具调用] 电商MCP工具返回：工具名称={}，字段={}",
-                toolName, response == null ? "空响应" : response.keySet());
-        log.debug("[阶段4 工具调用] 电商MCP工具完整响应：工具名称={}，响应={}", toolName, response);
+        log.info("[电商MCP] 工具返回：工具名称={}，success={}，message={}，data={}",
+                toolName,
+                response == null ? null : response.get("success"),
+                response == null ? null : response.get("message"),
+                response == null ? null : response.get("data"));
+        log.debug("[电商MCP] 工具完整响应：工具名称={}，响应={}", toolName, response);
 
         // 返回响应。
         return response == null ? Map.of() : response;

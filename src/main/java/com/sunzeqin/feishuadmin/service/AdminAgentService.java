@@ -337,7 +337,7 @@ public class AdminAgentService {
                 : scopeMappingService.scopeTextForDomain(domain);
 
         // 打印授权入口的 scope 来源。
-        log.info("[阶段4 工具调用] 主动授权链接scope选择：消息ID={}，业务域={}，scope={}",
+        log.info("[工具调用] 主动授权链接scope选择：消息ID={}，业务域={}，scope={}",
                 event.messageId(), domain.isBlank() ? "默认配置" : domain, scopeText);
 
         // 生成 OAuth 链接。这个链路由 Java 服务保存 token，不依赖 lark-cli 交互式登录。

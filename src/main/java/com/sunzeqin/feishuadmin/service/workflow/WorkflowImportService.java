@@ -106,7 +106,7 @@ public class WorkflowImportService {
         validate(request);
 
         // 打印导入总览。
-        log.info("[阶段9 工作流导入] 开始导入：工作流编码={}，名称={}，业务域={}，步骤数={}，启用={}，风险等级={}",
+        log.info("[工作流导入] 开始导入：工作流编码={}，名称={}，业务域={}，步骤数={}，启用={}，风险等级={}",
                 request.workflowCode(),
                 request.workflowName(),
                 request.domain(),
@@ -116,7 +116,7 @@ public class WorkflowImportService {
 
         // 逐步打印工具映射，让日志能直接看出 YAML 会调哪个工具。
         for (WorkflowStepImportRequest step : request.steps()) {
-            log.info("[阶段9 工作流导入] 步骤映射：工作流编码={}，步骤={}，步骤名称={}，执行器类型={}，工具名称={}，入参字段={}，输出变量={}，失败策略={}",
+            log.info("[工作流导入] 步骤映射：工作流编码={}，步骤={}，步骤名称={}，执行器类型={}，工具名称={}，入参字段={}，输出变量={}，失败策略={}",
                     request.workflowCode(),
                     step.stepNo(),
                     step.stepName(),
@@ -135,7 +135,7 @@ public class WorkflowImportService {
         }
 
         // 导入完成日志。
-        log.info("[阶段9 工作流导入] 导入完成：工作流编码={}，步骤数={}", request.workflowCode(), request.steps().size());
+        log.info("[工作流导入] 导入完成：工作流编码={}，步骤数={}", request.workflowCode(), request.steps().size());
 
         // 返回给调用方的摘要。
         return Map.of(

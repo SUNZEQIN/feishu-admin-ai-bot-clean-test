@@ -71,7 +71,7 @@ public class WorkflowRouterService {
 
         String routingText = routingText(event.text(), memoryText);
         List<WorkflowRouteCandidate> candidates = findCandidates(routingText);
-        log.info("[阶段10 工作流路由] 规则召回完成：消息ID={}，候选数量={}，候选={}",
+        log.info("[工作流路由] 规则召回完成：消息ID={}，候选数量={}，候选={}",
                 event.messageId(), candidates.size(), candidateNames(candidates));
 
         if (candidates.isEmpty()) {
@@ -81,7 +81,7 @@ public class WorkflowRouterService {
         if (chatModel == null) {
             WorkflowRouteCandidate first = candidates.get(0);
             if (first.score() >= 60 && uniqueTopCandidate(candidates)) {
-                log.info("[阶段10 工作流路由] LLM未启用，使用高分唯一候选：消息ID={}，工作流={}，规则分={}",
+                log.info("[工作流路由] LLM未启用，使用高分唯一候选：消息ID={}，工作流={}，规则分={}",
                         event.messageId(), first.workflowCode(), first.score());
                 return new WorkflowRouteResult(true, first.workflowCode(), 0.9,
                         "规则高分唯一命中：" + first.workflowName(), defaultArguments(event));
@@ -96,13 +96,13 @@ public class WorkflowRouterService {
 
         WorkflowRouteCandidate matched = findCandidate(candidates, decision.workflowCode());
         if (matched == null) {
-            log.warn("[阶段10 工作流路由] LLM返回了候选外工作流，已拒绝：消息ID={}，workflowCode={}",
+            log.warn("[工作流路由] LLM返回了候选外工作流，已拒绝：消息ID={}，workflowCode={}",
                     event.messageId(), decision.workflowCode());
             return WorkflowRouteResult.notMatched("LLM返回了候选外工作流");
         }
 
         if (decision.confidence() < MIN_LLM_CONFIDENCE) {
-            log.info("[阶段10 工作流路由] 置信度不足，放弃工作流：消息ID={}，workflowCode={}，置信度={}",
+            log.info("[工作流路由] 置信度不足，放弃工作流：消息ID={}，workflowCode={}，置信度={}",
                     event.messageId(), decision.workflowCode(), decision.confidence());
             return WorkflowRouteResult.notMatched("工作流匹配置信度不足：" + decision.confidence());
         }
@@ -115,11 +115,11 @@ public class WorkflowRouterService {
 
         Map<String, Object> normalizedArguments = normalizeArguments(arguments, event.text());
         if (!normalizedArguments.keySet().equals(arguments.keySet())) {
-            log.info("[阶段10 工作流路由] 入参已归一化：消息ID={}，原始字段={}，归一化字段={}",
+            log.info("[工作流路由] 入参已归一化：消息ID={}，原始字段={}，归一化字段={}",
                     event.messageId(), arguments.keySet(), normalizedArguments.keySet());
         }
 
-        log.info("[阶段10 工作流路由] 命中工作流：消息ID={}，workflowCode={}，workflowName={}，置信度={}，原因={}，入参字段={}",
+        log.info("[工作流路由] 命中工作流：消息ID={}，workflowCode={}，workflowName={}，置信度={}，原因={}，入参字段={}",
                 event.messageId(), matched.workflowCode(), matched.workflowName(),
                 decision.confidence(), decision.reason(), normalizedArguments.keySet());
 
@@ -145,10 +145,10 @@ public class WorkflowRouterService {
                         rs.getString("description"),
                         routingText));
 
-        log.info("[阶段10 工作流路由] 数据库工作流定义读取：启用数量={}，匹配文本={}",
+        log.info("[工作流路由] 数据库工作流定义读取：启用数量={}，匹配文本={}",
                 all.size(), routingText);
         for (WorkflowRouteCandidate candidate : all) {
-            log.info("[阶段10 工作流路由] 工作流定义：workflowCode={}，workflowName={}，intentKeywords={}，description={}，规则分数={}，命中原因={}",
+            log.info("[工作流路由] 工作流定义：workflowCode={}，workflowName={}，intentKeywords={}，description={}，规则分数={}，命中原因={}",
                     candidate.workflowCode(), candidate.workflowName(), candidate.intentKeywords(),
                     candidate.description(), candidate.score(), candidate.matchedReasons());
         }
@@ -161,7 +161,7 @@ public class WorkflowRouterService {
         }
 
         result.sort(Comparator.comparingInt(WorkflowRouteCandidate::score).reversed());
-        log.info("[阶段10 工作流路由] 规则过滤完成：最低分数={}，候选数量={}，候选={}",
+        log.info("[工作流路由] 规则过滤完成：最低分数={}，候选数量={}，候选={}",
                 MIN_RULE_SCORE, result.size(), candidateNames(result));
         if (result.size() > MAX_CANDIDATE_SIZE) {
             return new ArrayList<>(result.subList(0, MAX_CANDIDATE_SIZE));
@@ -246,7 +246,7 @@ public class WorkflowRouterService {
                 """.formatted(event.text(), routingText, jsonUtils.write(candidates));
 
         String answer = chatModel.chat(prompt);
-        log.debug("[阶段10 工作流路由] LLM原始输出：消息ID={}，输出={}", event.messageId(), answer);
+        log.debug("[工作流路由] LLM原始输出：消息ID={}，输出={}", event.messageId(), answer);
         return parseDecision(answer);
     }
 

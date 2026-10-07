@@ -111,7 +111,7 @@ public class UserOAuthTokenService {
                 .toUriString();
 
         // 打印授权链接摘要，不打印 token。
-        log.info("[阶段4 工具调用] 生成用户授权链接：用户openId={}，scope={}，state={}",
+        log.info("[工具调用] 生成用户授权链接：用户openId={}，scope={}，state={}",
                 event.openId(), normalizedScope, state);
 
         // 返回授权链接。
@@ -159,20 +159,20 @@ public class UserOAuthTokenService {
         // 读取数据库中的 token。
         UserOAuthToken token = findToken(userOpenId);
         if (token == null) {
-            log.info("[阶段4 工具调用] 用户token查询为空：用户openId={}", userOpenId);
+            log.info("[工具调用] 用户token查询为空：用户openId={}", userOpenId);
             return null;
         }
 
         // access_token 为空时不能给 CLI 使用。
         if (token.accessToken() == null || token.accessToken().isBlank()) {
-            log.warn("[阶段4 工具调用] 用户token不可用：用户openId={}，原因=access_token为空", userOpenId);
+            log.warn("[工具调用] 用户token不可用：用户openId={}，原因=access_token为空", userOpenId);
             return null;
         }
 
         // token 快过期时先刷新。
         if (token.expiresAt() != null
                 && Instant.now().isAfter(token.expiresAt().minusSeconds(properties.getOauthRefreshBeforeSeconds()))) {
-            log.info("[阶段4 工具调用] 用户token即将过期，准备刷新：用户openId={}，过期时间={}",
+            log.info("[工具调用] 用户token即将过期，准备刷新：用户openId={}，过期时间={}",
                     userOpenId, token.expiresAt());
             refreshToken(token);
             token = findToken(userOpenId);
@@ -215,7 +215,7 @@ public class UserOAuthTokenService {
                 .body(JsonNode.class);
 
         // 打印响应摘要，不打印 token。
-        log.info("[阶段4 工具调用] 用户授权换token响应：state={}，状态码={}，消息={}",
+        log.info("[工具调用] 用户授权换token响应：state={}，状态码={}，消息={}",
                 state, response.path("code").asInt(-1), response.path("msg").asText(""));
 
         // 检查返回结果。
@@ -264,7 +264,7 @@ public class UserOAuthTokenService {
         try {
             // refresh_token 已经过期时不刷新。
             if (token.refreshExpiresAt() != null && Instant.now().isAfter(token.refreshExpiresAt())) {
-                log.warn("[阶段4 工具调用] 用户token刷新跳过：用户openId={}，原因=refresh_token已过期", token.userOpenId());
+                log.warn("[工具调用] 用户token刷新跳过：用户openId={}，原因=refresh_token已过期", token.userOpenId());
                 return;
             }
 
@@ -278,7 +278,7 @@ public class UserOAuthTokenService {
                     .body(JsonNode.class);
 
             // 打印刷新摘要。
-            log.info("[阶段4 工具调用] 用户token刷新响应：用户openId={}，状态码={}，消息={}",
+            log.info("[工具调用] 用户token刷新响应：用户openId={}，状态码={}，消息={}",
                     token.userOpenId(), response.path("code").asInt(-1), response.path("msg").asText(""));
 
             // 检查返回结果。
@@ -288,7 +288,7 @@ public class UserOAuthTokenService {
             saveTokenFromData(token.userOpenId(), token.userId(), response.path("data"), token.scopeText());
         } catch (Exception e) {
             // 单个用户刷新失败不影响其它用户。
-            log.warn("[阶段4 工具调用] 用户token刷新失败：用户openId={}，错误={}", token.userOpenId(), e.getMessage());
+            log.warn("[工具调用] 用户token刷新失败：用户openId={}，错误={}", token.userOpenId(), e.getMessage());
         }
     }
 
@@ -335,7 +335,7 @@ public class UserOAuthTokenService {
                 Timestamp.from(refreshExpiresAt));
 
         // 打印保存日志，不打印 token 明文。
-        log.info("[阶段4 工具调用] 用户授权token已保存：用户openId={}，scope={}", userOpenId, normalizeScopes(scopeText));
+        log.info("[工具调用] 用户授权token已保存：用户openId={}，scope={}", userOpenId, normalizeScopes(scopeText));
     }
 
     private UserOAuthToken findToken(String userOpenId) {
@@ -392,7 +392,7 @@ public class UserOAuthTokenService {
         if (states.isEmpty()) {
             // 如果收到的 state 比系统生成的 32 位短，通常是飞书消息过长导致授权链接被截断。
             int prefixMatchCount = countStatePrefix(state);
-            log.warn("[阶段4 工具调用] OAuth state未找到：收到state长度={}，疑似前缀匹配数量={}，可能原因=授权链接被截断或链接已失效",
+            log.warn("[工具调用] OAuth state未找到：收到state长度={}，疑似前缀匹配数量={}，可能原因=授权链接被截断或链接已失效",
                     state.length(), prefixMatchCount);
             throw new IllegalArgumentException("OAuth state 不存在或已过期");
         }

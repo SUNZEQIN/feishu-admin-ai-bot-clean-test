@@ -304,12 +304,12 @@ public class FeishuOpenApiService {
     private synchronized String appAccessToken() {
         // token 未过期时直接复用。
         if (!appAccessToken.isBlank() && Instant.now().isBefore(appTokenExpiresAt.minusSeconds(60))) {
-            log.info("[阶段4 工具调用] 飞书app_access_token缓存命中：过期时间={}", appTokenExpiresAt);
+            log.info("[工具调用] 飞书app_access_token缓存命中：过期时间={}", appTokenExpiresAt);
             return appAccessToken;
         }
 
         // 打印请求摘要，不打印 appSecret。
-        log.info("[阶段4 工具调用] 飞书接口请求：方法=POST，接口=/open-apis/auth/v3/app_access_token/internal，appId={}，appSecret是否已配置={}",
+        log.info("[工具调用] 飞书接口请求：方法=POST，接口=/open-apis/auth/v3/app_access_token/internal，appId={}，appSecret是否已配置={}",
                 properties.getAppId(), properties.getAppSecret() != null && !properties.getAppSecret().isBlank());
 
         // 获取 app_access_token。
@@ -321,7 +321,7 @@ public class FeishuOpenApiService {
                 .body(JsonNode.class);
 
         // 打印响应摘要，不打印 token。
-        log.info("[阶段4 工具调用] 飞书接口响应摘要：方法=POST，接口=/open-apis/auth/v3/app_access_token/internal，状态码={}，消息={}，有效期秒数={}",
+        log.info("[工具调用] 飞书接口响应摘要：方法=POST，接口=/open-apis/auth/v3/app_access_token/internal，状态码={}，消息={}，有效期秒数={}",
                 response.path("code").asInt(-1),
                 response.path("msg").asText(""),
                 response.path("expire").asLong(0));
@@ -341,12 +341,12 @@ public class FeishuOpenApiService {
         // 如果 token 已存在且距离过期还有 60 秒以上，就直接复用缓存。
         if (!tenantAccessToken.isBlank() && Instant.now().isBefore(tokenExpiresAt.minusSeconds(60))) {
             // 打印 token 缓存命中日志，不打印 token 明文。
-            log.info("[阶段4 工具调用] 飞书token缓存命中：过期时间={}", tokenExpiresAt);
+            log.info("[工具调用] 飞书token缓存命中：过期时间={}", tokenExpiresAt);
             return tenantAccessToken;
         }
 
         // 打印获取 token 请求日志，只打印 appId，不打印 appSecret。
-        log.info("[阶段4 工具调用] 飞书接口请求：方法=POST，接口=/open-apis/auth/v3/tenant_access_token/internal，appId={}，appSecret是否已配置={}",
+        log.info("[工具调用] 飞书接口请求：方法=POST，接口=/open-apis/auth/v3/tenant_access_token/internal，appId={}，appSecret是否已配置={}",
                 properties.getAppId(), properties.getAppSecret() != null && !properties.getAppSecret().isBlank());
 
         // token 不存在或快过期时，调用飞书接口重新获取 tenant_access_token。
@@ -358,7 +358,7 @@ public class FeishuOpenApiService {
                 .body(JsonNode.class);
 
         // 打印获取 token 响应摘要，不打印 token 明文。
-        log.info("[阶段4 工具调用] 飞书接口响应摘要：方法=POST，接口=/open-apis/auth/v3/tenant_access_token/internal，状态码={}，消息={}，有效期秒数={}",
+        log.info("[工具调用] 飞书接口响应摘要：方法=POST，接口=/open-apis/auth/v3/tenant_access_token/internal，状态码={}，消息={}，有效期秒数={}",
                 response.path("code").asInt(-1),
                 response.path("msg").asText(""),
                 response.path("expire").asLong(0));

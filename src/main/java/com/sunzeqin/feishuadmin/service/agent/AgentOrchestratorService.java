@@ -77,12 +77,12 @@ public class AgentOrchestratorService {
 
     private AgentRunResult runInternal(FeishuMessageEvent event) {
         // 打印 Agent 开始执行日志，方便用 messageId 串起整次请求。
-        log.info("[阶段3 外层Agent规划] 开始执行：消息ID={}，会话ID={}，会话类型={}，最大步骤数={}，用户文本={}",
+        log.debug("[Agent规划] 开始执行：消息ID={}，会话ID={}，会话类型={}，最大步骤数={}，用户文本={}",
                 event.messageId(), event.chatId(), event.chatType(), MAX_STEPS, event.text());
 
         // 读取当前用户在当前会话里的历史记忆。
         String memoryText = memoryService.readMemoryText(event);
-        log.info("[阶段3 外层Agent规划] 会话记忆已注入：消息ID={}，会话类型={}，记忆文本长度={}，是否包含历史摘要={}，是否包含近期对话={}",
+        log.debug("[Agent规划] 会话记忆已注入：消息ID={}，会话类型={}，记忆文本长度={}，是否包含历史摘要={}，是否包含近期对话={}",
                 event.messageId(),
                 event.chatType(),
                 memoryText == null ? 0 : memoryText.length(),
@@ -95,7 +95,7 @@ public class AgentOrchestratorService {
         // LLM Agent Loop 没启用时，使用本地稳定兜底流程。
         if (!planner.enabled()) {
             // 打印未启用日志。
-            log.info("[阶段3 外层Agent规划] 停止执行：消息ID={}，原因=规划器未启用", event.messageId());
+            log.warn("[Agent规划] 停止执行：消息ID={}，原因=规划器未启用", event.messageId());
 
             // 没有 LLM 时无法判断应该调用哪个 CLI 业务域。
             AgentRunResult result = new AgentRunResult(false,
@@ -116,7 +116,7 @@ public class AgentOrchestratorService {
         // 最多执行 MAX_STEPS 轮。
         for (int step = 1; step <= MAX_STEPS; step++) {
             // 打印每一轮开始日志。
-            log.info("[阶段3 外层Agent规划] 步骤开始：消息ID={}，步骤={}，已有观察结果数量={}",
+            log.debug("[Agent规划] 步骤开始：消息ID={}，步骤={}，已有观察结果数量={}",
                     event.messageId(), step, observations.size());
 
             // 让 LLM 基于当前 observations 决定下一步。
@@ -124,7 +124,7 @@ public class AgentOrchestratorService {
                     memoryText, observations);
 
             // 打印当前轮规划结果。
-            log.info("[阶段3 外层Agent规划] 步骤决策：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}，最终回复长度={}",
+            log.info("[Agent规划] 步骤决策：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}，最终回复长度={}",
                     event.messageId(),
                     step,
                     decision.type(),
@@ -135,7 +135,7 @@ public class AgentOrchestratorService {
             // 如果 LLM 输出最终回复，就结束循环。
             if (!decision.toolCallDecision()) {
                 // 打印最终回复日志。
-                log.info("[阶段3 外层Agent规划] 生成最终回复：消息ID={}，步骤={}，回复长度={}",
+                log.debug("[Agent规划] 生成最终回复：消息ID={}，步骤={}，回复长度={}",
                         event.messageId(), step, decision.finalReply() == null ? 0 : decision.finalReply().length());
                 AgentRunResult result = new AgentRunResult(true, decision.finalReply());
                 memoryService.saveAssistantMessage(event, result.reply());
@@ -145,7 +145,7 @@ public class AgentOrchestratorService {
             // 如果 LLM 说要调用工具但没给工具参数，直接结束。
             if (decision.toolCall() == null) {
                 // 打印缺少工具调用日志。
-                log.warn("[阶段3 外层Agent规划] 执行失败：消息ID={}，步骤={}，原因=缺少工具调用参数", event.messageId(), step);
+                log.warn("[Agent规划] 执行失败：消息ID={}，步骤={}，原因=缺少工具调用参数", event.messageId(), step);
                 AgentRunResult result = new AgentRunResult(false, "⚠️ Agent 没有给出可执行工具。");
                 memoryService.saveAssistantMessage(event, result.reply());
                 return result;
@@ -155,17 +155,11 @@ public class AgentOrchestratorService {
             ToolCall toolCall = enrichToolCall(event, decision.toolCall());
 
             // 打印工具执行前日志。
-            log.info("[阶段4 工具调用] 准备执行工具：消息ID={}，步骤={}，工具={}，入参={}",
+            log.info("[工具调用] 准备执行工具：消息ID={}，步骤={}，工具={}，入参={}",
                     event.messageId(), step, toolCall.name(), toolCall.params());
 
             // 执行工具。
             ToolResult result = toolRegistry.execute(toolCall);
-
-            // 打印工具执行结果日志。
-            log.info("[阶段4 工具调用] 工具返回摘要：消息ID={}，步骤={}，工具={}，是否成功={}，说明={}，数据字段={}",
-                    event.messageId(), step, result.tool(), result.success(), result.message(), result.data().keySet());
-            log.debug("[阶段4 工具调用] 工具完整数据：消息ID={}，步骤={}，工具={}，数据={}",
-                    event.messageId(), step, result.tool(), result.data());
 
             // 保存工具观察结果。
             observations.add(result);
@@ -183,7 +177,7 @@ public class AgentOrchestratorService {
             // 普通工具已经生成最终回复时，也直接结束，避免外层 Agent 再规划一轮导致重复回复和耗时变长。
             String finalReply = finalReplyFromToolResult(result);
             if (!finalReply.isBlank()) {
-                log.info("[阶段4 工具调用] 工具已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
+                log.info("[工具调用] 工具已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
                         event.messageId(), step, result.tool(), finalReply.length());
                 AgentRunResult runResult = new AgentRunResult(result.success(), finalReply);
                 memoryService.saveAssistantMessage(event, runResult.reply());
@@ -194,7 +188,7 @@ public class AgentOrchestratorService {
             String authorizeReply = authorizeReplyFromToolResult(result);
             if (!authorizeReply.isBlank()) {
                 String authorizeUrl = authorizeUrlFromToolResult(result);
-                log.info("[阶段4 工具调用] 授权链接已生成，直接结束流程：消息ID={}，步骤={}，工具={}",
+                log.info("[工具调用] 授权链接已生成，直接结束流程：消息ID={}，步骤={}，工具={}",
                         event.messageId(), step, result.tool());
                 AgentRunResult runResult = new AgentRunResult(true, authorizeReply, authorizeUrl);
                 memoryService.saveAssistantMessage(event, runResult.reply());
@@ -204,7 +198,7 @@ public class AgentOrchestratorService {
             // 工具失败时结束执行，并把原因回复给用户。
             if (!result.success()) {
                 // 打印工具失败导致 Agent 结束的日志。
-                log.warn("[阶段4 工具调用] 工具失败导致流程结束：消息ID={}，步骤={}，工具={}，原因={}",
+                log.warn("[工具调用] 工具失败导致流程结束：消息ID={}，步骤={}，工具={}，原因={}",
                         event.messageId(), step, result.tool(), result.message());
                 AgentRunResult runResult = new AgentRunResult(false, "⚠️ 执行失败\n\n🔎 原因：" + result.message());
                 memoryService.saveAssistantMessage(event, runResult.reply());
@@ -213,7 +207,7 @@ public class AgentOrchestratorService {
         }
 
         // 超过最大步数仍未结束，返回保护性提示。
-        log.warn("[阶段3 外层Agent规划] 强制停止：消息ID={}，原因=超过最大步骤数，最大步骤数={}",
+        log.warn("[Agent规划] 强制停止：消息ID={}，原因=超过最大步骤数，最大步骤数={}",
                 event.messageId(), MAX_STEPS);
         AgentRunResult result = new AgentRunResult(false, "⚠️ 本次任务步骤过多，已停止执行，避免重复操作。");
         memoryService.saveAssistantMessage(event, result.reply());

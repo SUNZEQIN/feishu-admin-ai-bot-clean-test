@@ -79,16 +79,14 @@ public class AgentPlannerService {
         String prompt = buildPrompt(userText, chatId, memoryText, observations);
 
         // 打印规划输入摘要，排查提示词和 observation 数量。
-        log.info("[阶段3 外层Agent规划] 规划输入：消息ID={}，步骤={}，会话ID={}，观察结果数量={}，用户文本={}",
-                messageId, step, chatId, observations.size(), userText);
-        log.info("[阶段3 外层Agent规划] 本轮上下文：消息ID={}，步骤={}，记忆长度={}，业务Skill长度={}，工具清单长度={}，观察工具={}，可用工具={}",
-                messageId, step,
+        log.info("[Agent规划] 规划输入：消息ID={}，步骤={}，会话ID={}，观察结果数量={}，记忆长度={}，业务Skill长度={}，工具清单长度={}，观察工具={}，可用工具={}，用户文本={}",
+                messageId, step, chatId, observations.size(),
                 memoryText == null ? 0 : memoryText.length(),
                 ecommerceAgentSkill == null ? 0 : ecommerceAgentSkill.length(),
                 toolRegistry.toolDescriptions().length(),
                 observationTools(observations),
-                toolNames());
-        log.debug("[阶段3 外层Agent规划] 本轮完整Prompt：消息ID={}，步骤={}，Prompt={}", messageId, step, prompt);
+                toolNames(), userText);
+        log.debug("[Agent规划] 本轮完整Prompt：消息ID={}，步骤={}，Prompt={}", messageId, step, prompt);
 
         // 调用模型。
         String answer;
@@ -97,7 +95,7 @@ public class AgentPlannerService {
         } catch (Exception e) {
             // 大模型余额不足时，直接返回用户能看懂的中文提示。
             if (LlmErrorUtils.insufficientBalance(e)) {
-                log.warn("[阶段3 外层Agent规划] 规划失败：消息ID={}，步骤={}，原因=大模型余额不足", messageId, step);
+                log.warn("[Agent规划] 规划失败：消息ID={}，步骤={}，原因=大模型余额不足", messageId, step);
                 return new AgentDecision("final_answer", "大模型余额不足", null,
                         LlmErrorUtils.insufficientBalanceReply());
             }
@@ -107,13 +105,13 @@ public class AgentPlannerService {
         }
 
         // 打印模型原始输出，方便排查 JSON 格式问题。
-        log.debug("[阶段3 外层Agent规划] 模型原始输出：消息ID={}，步骤={}，模型输出={}", messageId, step, answer);
+        log.debug("[Agent规划] 模型原始输出：消息ID={}，步骤={}，模型输出={}", messageId, step, answer);
 
         // 解析模型决策。
         AgentDecision decision = parseDecision(answer);
 
         // 打印决策日志，方便排查模型下一步要做什么。
-        log.info("[阶段3 外层Agent规划] 规划结果：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}",
+        log.info("[Agent规划] 规划结果：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}",
                 messageId,
                 step,
                 decision.type(),
@@ -145,7 +143,7 @@ public class AgentPlannerService {
 
         // 没配置 API Key 时不创建模型。
         if (properties.getLlmApiKey() == null || properties.getLlmApiKey().isBlank()) {
-            log.warn("[阶段3 外层Agent规划] 大模型未启用：原因=API Key为空");
+            log.warn("[Agent规划] 大模型未启用：原因=API Key为空");
             return null;
         }
 
@@ -248,7 +246,7 @@ public class AgentPlannerService {
             return resource.getContentAsString(StandardCharsets.UTF_8);
         } catch (Exception e) {
             // Skill 读取失败时记录日志并返回空字符串，不影响主流程启动。
-            log.warn("[阶段3 外层Agent规划] Skill读取失败：路径={}，错误={}", path, e.getMessage());
+            log.warn("[Agent规划] Skill读取失败：路径={}，错误={}", path, e.getMessage());
             return "";
         }
     }

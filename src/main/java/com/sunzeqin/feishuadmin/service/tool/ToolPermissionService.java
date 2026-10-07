@@ -47,10 +47,10 @@ public class ToolPermissionService {
 
         // 启动时打印一次权限策略，方便部署后确认是否生效。
         if (!enforced()) {
-            log.warn("[阶段4 工具调用] 工具调用白名单未配置：当前任意飞书用户都可以触发工具执行，"
+            log.warn("[工具调用] 工具调用白名单未配置：当前任意飞书用户都可以触发工具执行，"
                     + "生产环境建议配置 FEISHU_TOOL_ALLOWED_OPEN_IDS 或 FEISHU_TOOL_ALLOWED_CHAT_IDS");
         } else {
-            log.info("[阶段4 工具调用] 工具调用白名单已启用：调用者数量={}，会话数量={}",
+            log.info("[工具调用] 工具调用白名单已启用：调用者数量={}，会话数量={}",
                     allowedOpenIds.size(), allowedChatIds.size());
         }
     }
@@ -82,7 +82,7 @@ public class ToolPermissionService {
             boolean callerAllowed = (!openId.isBlank() && allowedOpenIds.contains(openId))
                     || (!userId.isBlank() && allowedOpenIds.contains(userId));
             if (!callerAllowed) {
-                log.warn("[阶段4 工具调用] 权限拒绝：工具={}，调用者={}，原因=调用者不在白名单内",
+                log.warn("[工具调用] 权限拒绝：工具={}，调用者={}，原因=调用者不在白名单内",
                         call.name(), mask(openId));
                 return Decision.deny("当前用户没有执行该操作的权限，已拒绝执行");
             }
@@ -90,13 +90,13 @@ public class ToolPermissionService {
 
         // 配置了会话白名单时，必须命中来源会话。
         if (!allowedChatIds.isEmpty() && !allowedChatIds.contains(chatId)) {
-            log.warn("[阶段4 工具调用] 权限拒绝：工具={}，会话={}，调用者={}，原因=会话不在白名单内",
+            log.warn("[工具调用] 权限拒绝：工具={}，会话={}，调用者={}，原因=会话不在白名单内",
                     call.name(), mask(chatId), mask(openId));
             return Decision.deny("当前会话没有执行该操作的权限，已拒绝执行");
         }
 
         // 日志里只打印脱敏身份，避免把完整 open_id 刷进日志。
-        log.info("[阶段4 工具调用] 权限通过：工具={}，调用者={}，会话={}, 策略=白名单",
+        log.info("[工具调用] 权限通过：工具={}，调用者={}，会话={}, 策略=白名单",
                 call.name(), mask(openId), mask(chatId));
 
         return Decision.allow();

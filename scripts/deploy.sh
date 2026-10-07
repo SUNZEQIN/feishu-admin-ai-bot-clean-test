@@ -13,7 +13,11 @@ APP_NAME="${APP_NAME:-$(basename "${APP_DIR}")}"
 CONTAINER_NAME="${CONTAINER_NAME:-${APP_NAME}}"
 NETWORK_NAME="${NETWORK_NAME:-feishu-net}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
-GIT_PROXY_PREFIX="${GIT_PROXY_PREFIX:-}"
+# 默认从 GitHub 拉取，避免服务器上的 origin 指向 /opt/git 等本地裸仓库。
+GIT_REPO_URL="${GIT_REPO_URL:-https://github.com/SUNZEQIN/feishu-admin-ai-bot-clean-test.git}"
+# ghproxy.net 要求把 GitHub 地址拼接在代理地址后面，例如：
+# https://ghproxy.net/https://github.com/SUNZEQIN/feishu-admin-ai-bot-clean-test.git
+GIT_PROXY_PREFIX="${GIT_PROXY_PREFIX:-https://ghproxy.net/}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-120}"
 GIT_SAFE_DIRECTORY_AUTO="${GIT_SAFE_DIRECTORY_AUTO:-true}"
 
@@ -34,20 +38,19 @@ if [ -d ".git" ]; then
     git config --global --add safe.directory "${APP_DIR}" >/dev/null 2>&1 || true
   fi
 
-  GIT_ORIGIN_URL="$(git remote get-url origin 2>/dev/null || true)"
-  GIT_REPO_URL="${GIT_REPO_URL:-${GIT_ORIGIN_URL}}"
-  if [ -z "${GIT_REPO_URL}" ]; then
-    echo "当前仓库没有 origin，且未配置 GIT_REPO_URL，跳过 git pull。"
+  if [[ "${GIT_REPO_URL}" == https://ghproxy.net/* ]]; then
+    GIT_PULL_URL="${GIT_REPO_URL}"
   elif [ -n "${GIT_PROXY_PREFIX}" ]; then
     GIT_PULL_URL="${GIT_PROXY_PREFIX}${GIT_REPO_URL}"
-    echo "使用 Git 代理拉取代码：${GIT_PULL_URL}"
-    git pull "${GIT_PULL_URL}" "${GIT_BRANCH}"
   else
-    echo "使用 origin 拉取代码：分支=${GIT_BRANCH}"
-    git pull origin "${GIT_BRANCH}"
+    GIT_PULL_URL="${GIT_REPO_URL}"
   fi
+  echo "使用远程仓库拉取代码：仓库=${GIT_REPO_URL}，代理=${GIT_PULL_URL}，分支=${GIT_BRANCH}"
+  # 只允许快进更新，避免部署脚本自动覆盖服务器上的未提交修改或产生隐式合并。
+  git pull --ff-only "${GIT_PULL_URL}" "${GIT_BRANCH}"
 else
-  echo "当前目录不是 Git 仓库，跳过 git pull。"
+  echo "当前目录不是 Git 仓库，无法从远程拉取代码。"
+  exit 1
 fi
 
 echo "[4/7] 确认外部 Docker 网络"

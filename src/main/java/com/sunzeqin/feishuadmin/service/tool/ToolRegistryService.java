@@ -129,12 +129,12 @@ public class ToolRegistryService {
 
         // 两边一致时打印一条 INFO 即可。
         if (describeOnly.isEmpty() && dispatchOnly.isEmpty()) {
-            log.info("[阶段4 工具调用] 工具清单自检通过：工具数量={}，工具={}", described.size(), described);
+            log.info("[工具调用] 工具清单自检通过：工具数量={}，工具={}", described.size(), described);
             return;
         }
 
         // 不一致时打 ERROR，提醒维护者补齐，避免线上出现难排查的“工具不存在”。
-        log.error("[阶段4 工具调用] 工具清单不一致：仅写在说明里={}，仅可执行但未写说明={}", describeOnly, dispatchOnly);
+        log.error("[工具调用] 工具清单不一致：仅写在说明里={}，仅可执行但未写说明={}", describeOnly, dispatchOnly);
     }
 
     /**
@@ -196,7 +196,7 @@ public class ToolRegistryService {
      */
     public ToolResult execute(ToolCall call) {
         // 打印工具调用入参，方便排查 Agent 到底让系统做了什么。
-        log.info("[阶段4 工具调用] 开始：工具名称={}，入参={}", call.name(), call.params());
+        log.info("[工具调用] 开始：工具名称={}，入参={}", call.name(), call.params());
 
         // 工具名为空时无法分发。
         if (call.name().isBlank()) {
@@ -227,7 +227,7 @@ public class ToolRegistryService {
             return result;
         } catch (Exception e) {
             // 工具执行异常时，返回失败结果给 Agent 观察。
-            log.warn("[阶段4 工具调用] 异常：工具名称={}，错误={}", call.name(), e.getMessage());
+            log.warn("[工具调用] 异常：工具名称={}，错误={}", call.name(), e.getMessage());
 
             // 大模型余额不足时返回中文业务提示，不把底层 JSON 直接抛给用户。
             String message = e.getMessage();
@@ -265,7 +265,7 @@ public class ToolRegistryService {
         } catch (TimeoutException e) {
             // 超时后取消任务并返回可读原因，让 Agent 决定是否重试或换方案。
             future.cancel(true);
-            log.warn("[阶段4 工具调用] 执行超时：工具名称={}，超时时间={}秒", call.name(), timeoutSeconds);
+            log.warn("[工具调用] 执行超时：工具名称={}，超时时间={}秒", call.name(), timeoutSeconds);
             return ToolResult.failed(call.name(),
                     "工具执行超时：超过 " + timeoutSeconds + " 秒未返回，已中断本次调用");
         } catch (InterruptedException e) {
@@ -340,10 +340,10 @@ public class ToolRegistryService {
     }
 
     private void logResult(ToolResult result) {
-        // INFO 只打印结果摘要，完整数据放到 DEBUG，避免一屏日志被大 JSON 淹没。
-        log.info("[阶段4 工具调用] 结果摘要：工具名称={}，是否成功={}，说明={}，数据字段={}",
-                result.tool(), result.success(), result.message(), result.data().keySet());
-        log.debug("[阶段4 工具调用] 结果完整数据：工具名称={}，数据={}", result.tool(), result.data());
+        // 工具结果的三个核心字段统一在 INFO 打印，便于按消息 ID 还原一轮调用。
+        log.info("[工具调用] 工具返回摘要：工具名称={}，success={}，message={}，data={}",
+                result.tool(), result.success(), result.message(), result.data());
+        log.debug("[工具调用] 工具返回完整数据：工具名称={}，数据={}", result.tool(), result.data());
     }
 
     private ToolResult runSkill(ToolCall call) {
@@ -522,6 +522,6 @@ public class ToolRegistryService {
     void shutdownToolExecutor() {
         // 先停止接收新任务，再中断在途任务。
         toolExecutor.shutdownNow();
-        log.info("[阶段4 工具调用] 工具执行线程池已关闭");
+        log.info("[工具调用] 工具执行线程池已关闭");
     }
 }

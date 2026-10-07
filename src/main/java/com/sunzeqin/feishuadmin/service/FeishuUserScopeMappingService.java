@@ -187,7 +187,7 @@ public class FeishuUserScopeMappingService {
 
             // 资源不存在时返回空映射，调用方会使用默认 scope 兜底。
             if (!resource.exists()) {
-                log.warn("[阶段4 工具调用] 飞书用户scope映射文件不存在：路径={}", RESOURCE_PATH);
+                log.warn("[工具调用] 飞书用户scope映射文件不存在：路径={}", RESOURCE_PATH);
                 return Map.of();
             }
 
@@ -214,13 +214,13 @@ public class FeishuUserScopeMappingService {
             });
 
             // 打印加载结果，方便确认映射是否生效。
-            log.info("[阶段4 工具调用] 飞书用户scope映射加载完成：业务域数量={}", result.size());
+            log.info("[工具调用] 飞书用户scope映射加载完成：业务域数量={}", result.size());
 
             // 返回不可变映射。
             return Collections.unmodifiableMap(result);
         } catch (Exception e) {
             // 加载失败时记录错误并使用空映射兜底，不影响服务启动。
-            log.warn("[阶段4 工具调用] 飞书用户scope映射加载失败：错误={}", e.getMessage());
+            log.warn("[工具调用] 飞书用户scope映射加载失败：错误={}", e.getMessage());
             return Map.of();
         }
     }

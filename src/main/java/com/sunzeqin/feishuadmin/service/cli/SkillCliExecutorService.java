@@ -156,7 +156,7 @@ public class SkillCliExecutorService {
         }
 
         // 打印 Skill + CLI 开始日志。
-        log.info("[阶段5 SkillCLI规划] 开始：业务域={}，目标={}，来源群ID={}，最大步骤数={}",
+        log.info("[SkillCLI规划] 开始：业务域={}，目标={}，来源群ID={}，最大步骤数={}",
                 normalizedDomain, goal, sourceChatId, properties.getCliMaxSteps());
 
         // 循环执行 CLI 内部规划。
@@ -166,7 +166,7 @@ public class SkillCliExecutorService {
                     senderOpenId, senderUserId, skillText, observations);
 
             // 打印规划输入摘要。
-            log.info("[阶段5 SkillCLI规划] 规划输入：业务域={}，步骤={}，观察结果数量={}",
+            log.info("[SkillCLI规划] 规划输入：业务域={}，步骤={}，观察结果数量={}",
                     normalizedDomain, step, observations.size());
 
             // 调用模型规划下一条 CLI 命令或最终回复。
@@ -176,7 +176,7 @@ public class SkillCliExecutorService {
             } catch (Exception e) {
                 // 大模型余额不足时，直接把明确提示返回给外层工具。
                 if (LlmErrorUtils.insufficientBalance(e)) {
-                    log.warn("[阶段5 SkillCLI规划] 规划失败：业务域={}，步骤={}，原因=大模型余额不足", normalizedDomain, step);
+                    log.warn("[SkillCLI规划] 规划失败：业务域={}，步骤={}，原因=大模型余额不足", normalizedDomain, step);
                     return Map.of(
                             "domain", normalizedDomain,
                             "goal", goal,
@@ -191,13 +191,13 @@ public class SkillCliExecutorService {
             }
 
             // 打印模型原始输出。
-            log.debug("[阶段5 SkillCLI规划] 模型原始输出：业务域={}，步骤={}，模型输出={}", normalizedDomain, step, answer);
+            log.debug("[SkillCLI规划] 模型原始输出：业务域={}，步骤={}，模型输出={}", normalizedDomain, step, answer);
 
             // 解析模型决策。
             CliStepDecision decision = parseDecision(answer);
 
             // 打印模型决策。
-            log.info("[阶段5 SkillCLI规划] 规划结果：业务域={}，步骤={}，类型={}，原因={}，命令={}，最终回复长度={}",
+            log.info("[SkillCLI规划] 规划结果：业务域={}，步骤={}，类型={}，原因={}，命令={}，最终回复长度={}",
                     normalizedDomain, step, decision.type(), decision.reason(), decision.command(),
                     decision.finalReply() == null ? 0 : decision.finalReply().length());
 
@@ -219,7 +219,7 @@ public class SkillCliExecutorService {
             // 之前的事故就是模型给 drive +delete 自己加了 --yes，一句话删掉了 4 个真实多维表格。
             DestructiveCommandGuard.Decision guardDecision = destructiveCommandGuard.check(command, goal);
             if (guardDecision.blocked()) {
-                log.warn("[阶段6 CLI执行] 破坏性命令已拦截，等待用户确认：业务域={}，步骤={}，命令={}，命中={}",
+                log.warn("[CLI执行] 破坏性命令已拦截，等待用户确认：业务域={}，步骤={}，命令={}，命中={}",
                         normalizedDomain, step, command, guardDecision.matchedToken());
                 return Map.of(
                         "domain", normalizedDomain,
@@ -233,7 +233,7 @@ public class SkillCliExecutorService {
             // 如果模型重复执行已经成功过的相同命令，跳过真实调用，避免浪费步骤和重复请求飞书。
             if (hasSuccessfulCommand(observations, command)) {
                 String message = "重复命令已跳过，请基于已有成功结果继续下一步：" + String.join(" ", command);
-                log.warn("[阶段5 SkillCLI规划] 重复命令已跳过：业务域={}，步骤={}，命令={}", normalizedDomain, step, command);
+                log.warn("[SkillCLI规划] 重复命令已跳过：业务域={}，步骤={}，命令={}", normalizedDomain, step, command);
                 observations.add(new CliCommandResult(String.join(" ", command), 0, message, ""));
                 continue;
             }
@@ -243,7 +243,7 @@ public class SkillCliExecutorService {
             // 继续循环只会烧完剩余步数，最后报一句和真实问题无关的「超过最大步骤数」。
             String previousFailure = previousFailureReason(observations, command);
             if (previousFailure != null) {
-                log.warn("[阶段5 SkillCLI规划] 同一条命令重复失败，停止重试：业务域={}，步骤={}，命令={}，上次失败={}",
+                log.warn("[SkillCLI规划] 同一条命令重复失败，停止重试：业务域={}，步骤={}，命令={}，上次失败={}",
                         normalizedDomain, step, command, previousFailure);
                 throw new IllegalStateException("同一条命令重复失败，已停止重试。命令="
                         + String.join(" ", command) + "；上次失败原因=" + previousFailure);
@@ -264,7 +264,7 @@ public class SkillCliExecutorService {
                 // 改为把判断结果回灌给内层规划器，让它换身份或换命令重试。
                 // 循环安全由 previousFailureReason 兜住：模型真的换不出新命令时会在两次失败内停下。
                 if (hasUserTokenForDomain(senderOpenId, normalizedDomain)) {
-                    log.info("[阶段5 SkillCLI规划] 用户已持有业务域授权，缺权限的是命令本身，不再要求授权：业务域={}，命令={}",
+                    log.info("[SkillCLI规划] 用户已持有业务域授权，缺权限的是命令本身，不再要求授权：业务域={}，命令={}",
                             normalizedDomain, command);
                     observations.add(new CliCommandResult("SYSTEM_HINT", 1,
                             "本条命令因为缺少权限失败，但该用户已经完成本业务域的授权。"
@@ -385,7 +385,7 @@ public class SkillCliExecutorService {
                 2. 或者你回复“生成文档版思维导图”，我会用 Markdown 大纲文档承载总结。
                 """.strip();
 
-        log.info("[阶段5 SkillCLI规划] 原生思维导图直达拦截：业务域={}，目标={}，原因=缺少新建mindnote能力",
+        log.info("[SkillCLI规划] 原生思维导图直达拦截：业务域={}，目标={}，原因=缺少新建mindnote能力",
                 domain, goal);
 
         return Map.of(
@@ -423,7 +423,7 @@ public class SkillCliExecutorService {
         );
 
         // 打印直达流程日志。
-        log.info("[阶段5 SkillCLI规划] 命中思维导图直达流程：业务域={}，标题={}，内容长度={}",
+        log.info("[SkillCLI规划] 命中思维导图直达流程：业务域={}，标题={}，内容长度={}",
                 domain, title, content.length());
 
         // 执行创建文档命令。
@@ -671,7 +671,7 @@ public class SkillCliExecutorService {
             }
         }
 
-        log.info("[阶段5 SkillCLI规划] 授权scope已按业务域补齐：业务域={}，报错抽取={}个，合并后={}个",
+        log.info("[SkillCLI规划] 授权scope已按业务域补齐：业务域={}，报错抽取={}个，合并后={}个",
                 domain, missingScopes == null ? 0 : missingScopes.split("\\s+").length, merged.size());
 
         return String.join(" ", merged);
@@ -690,20 +690,20 @@ public class SkillCliExecutorService {
         String scopeText = authorizationScopeTextForGoal(normalizedDomain, goal);
 
         // 打印授权 scope，方便排查为什么生成这个授权链接。
-        log.info("[阶段4 工具调用] 用户身份授权scope映射：业务域={}，scope数量={}，scope={}",
+            log.info("[工具调用] 用户身份授权scope映射：业务域={}，scope数量={}，scope={}",
                 normalizedDomain, scopeText.split("\\s+").length, scopeText);
 
         // 已经有可用 token 且 scope 覆盖当前业务域时继续执行。
         UserOAuthToken token = userOAuthTokenService.findUsableTokenForCli(senderOpenId);
         if (token != null && userOAuthTokenService.tokenHasScopes(senderOpenId, scopeText)) {
-            log.info("[阶段4 工具调用] 用户身份任务token可用：用户openId={}，过期时间={}，scope={}",
+            log.info("[工具调用] 用户身份任务token可用：用户openId={}，过期时间={}，scope={}",
                     senderOpenId, token.expiresAt(), token.scopeText());
             return Map.of();
         }
 
         // 有 token 但 scope 不足时，也重新生成带当前业务域 scope 的授权链接。
         if (token != null) {
-            log.info("[阶段4 工具调用] 用户身份任务token权限不足：用户openId={}，已有scope={}，需要scope={}",
+            log.info("[工具调用] 用户身份任务token权限不足：用户openId={}，已有scope={}，需要scope={}",
                     senderOpenId, token.scopeText(), scopeText);
         }
 
@@ -1046,10 +1046,10 @@ public class SkillCliExecutorService {
                 if (i + 1 < command.size()) {
                     String oldValue = command.get(i + 1);
                     if (!"bot".equals(oldValue) && !"user".equals(oldValue)) {
-                        log.warn("[阶段6 CLI执行] 身份参数已修正：原身份={}，新身份=bot，原因=只允许bot或user", oldValue);
+                    log.warn("[CLI执行] 身份参数已修正：原身份={}，新身份=bot，原因=只允许bot或user", oldValue);
                         command.set(i + 1, "bot");
                     } else if ("user".equals(oldValue) && !userIdentityAllowed(goal, domain, senderOpenId)) {
-                        log.warn("[阶段6 CLI执行] 身份参数已修正：原身份=user，新身份=bot，原因=用户没有明确要求用户身份，且没有可用的用户token");
+                        log.warn("[CLI执行] 身份参数已修正：原身份=user，新身份=bot，原因=用户没有明确要求用户身份，且没有可用的用户token");
                         command.set(i + 1, "bot");
                     }
                 } else {
@@ -1061,10 +1061,10 @@ public class SkillCliExecutorService {
             if (part.startsWith("--as=")) {
                 hasAs = true;
                 if (!"--as=bot".equals(part) && !"--as=user".equals(part)) {
-                    log.warn("[阶段6 CLI执行] 身份参数已修正：原参数={}，新参数=--as=bot，原因=只允许bot或user", part);
+                    log.warn("[CLI执行] 身份参数已修正：原参数={}，新参数=--as=bot，原因=只允许bot或user", part);
                     command.set(i, "--as=bot");
                 } else if ("--as=user".equals(part) && !userIdentityAllowed(goal, domain, senderOpenId)) {
-                    log.warn("[阶段6 CLI执行] 身份参数已修正：原参数=--as=user，新参数=--as=bot，原因=用户没有明确要求用户身份，且没有可用的用户token");
+                    log.warn("[CLI执行] 身份参数已修正：原参数=--as=user，新参数=--as=bot，原因=用户没有明确要求用户身份，且没有可用的用户token");
                     command.set(i, "--as=bot");
                 }
             }
@@ -1074,7 +1074,7 @@ public class SkillCliExecutorService {
         if (!hasAs) {
             command.add("--as");
             command.add("bot");
-            log.info("[阶段6 CLI执行] 身份参数已补充：身份=bot，原因=管理员机器人项目默认使用bot身份");
+            log.info("[CLI执行] 身份参数已补充：身份=bot，原因=管理员机器人项目默认使用bot身份");
         }
     }
 
@@ -1100,7 +1100,7 @@ public class SkillCliExecutorService {
 
         // 条件二：调用人已经有覆盖当前业务域的用户 token。
         if (hasUserTokenForDomain(senderOpenId, domain)) {
-            log.info("[阶段6 CLI执行] 身份参数保留user：用户openId={}，业务域={}，原因=已有覆盖该业务域的用户token",
+            log.info("[CLI执行] 身份参数保留user：用户openId={}，业务域={}，原因=已有覆盖该业务域的用户token",
                     senderOpenId, domain);
             return true;
         }
@@ -1125,7 +1125,7 @@ public class SkillCliExecutorService {
             return userOAuthTokenService.tokenHasScopes(senderOpenId, scopeText);
         } catch (Exception e) {
             // token 查询失败时保守处理：按没有 token 对待。
-            log.warn("[阶段6 CLI执行] 查询用户token失败，按无token处理：用户openId={}，业务域={}，错误={}",
+            log.warn("[CLI执行] 查询用户token失败，按无token处理：用户openId={}，业务域={}，错误={}",
                     senderOpenId, domain, e.getMessage());
             return false;
         }
@@ -1178,7 +1178,7 @@ public class SkillCliExecutorService {
                 String newValue = targetDate + value.substring(10);
                 if (!oldValue.equals(newValue)) {
                     command.set(i, newValue);
-                    log.warn("[阶段6 CLI执行] 相对日期已校正：原值={}，新值={}，原因=用户目标包含相对日期",
+                    log.warn("[CLI执行] 相对日期已校正：原值={}，新值={}，原因=用户目标包含相对日期",
                             oldValue, newValue);
                 }
             }
@@ -1215,7 +1215,7 @@ public class SkillCliExecutorService {
             CliTokenContext tokenContext = prepareAccessTokenForCli(command, senderOpenId);
 
             // 打印 CLI 执行入参。
-            log.info("[阶段6 CLI执行] 执行命令：命令={}", command);
+            log.info("[CLI执行] 执行命令：命令={}", command);
 
             // 创建 CLI 进程。业务命令会使用受控环境，明确注入当前身份 token。
             Process process = buildProcess(command, tokenContext).start();
@@ -1247,16 +1247,16 @@ public class SkillCliExecutorService {
             int exitCode = process.exitValue();
 
             // 打印 CLI 执行结果。
-            log.info("[阶段7 CLI结果] 命令结果摘要：命令={}，退出码={}，标准输出长度={}，错误输出长度={}，标准输出摘要={}，错误输出摘要={}",
+            log.info("[CLI结果] 命令结果摘要：命令={}，退出码={}，标准输出长度={}，错误输出长度={}，标准输出摘要={}，错误输出摘要={}",
                     command, exitCode, length(stdout), length(stderr), firstLine(stdout), firstLine(stderr));
-            log.debug("[阶段7 CLI结果] 命令原始输出：命令={}，退出码={}，标准输出={}，错误输出={}",
+            log.debug("[CLI结果] 命令原始输出：命令={}，退出码={}，标准输出={}，错误输出={}",
                     command, exitCode, stdout, stderr);
 
             // 返回 CLI 执行结果。
             return new CliCommandResult(String.join(" ", command), exitCode, stdout, stderr);
         } catch (Exception e) {
             // 打印 CLI 执行异常。
-            log.warn("[阶段7 CLI结果] 命令异常：命令={}，错误={}", command, e.getMessage());
+            log.warn("[CLI结果] 命令异常：命令={}，错误={}", command, e.getMessage());
 
             // 返回失败结果。
             return new CliCommandResult(String.join(" ", command), -1, "", e.getMessage());
@@ -1288,7 +1288,7 @@ public class SkillCliExecutorService {
             if (token == null) {
                 throw new IllegalStateException("用户尚未授权或用户token不可用，请先完成用户授权");
             }
-            log.info("[阶段6 CLI执行] 用户token准备完成：用户openId={}，过期时间={}，scope={}",
+            log.info("[CLI执行] 用户token准备完成：用户openId={}，过期时间={}，scope={}",
                     senderOpenId, token.expiresAt(), token.scopeText());
             return new CliTokenContext("user", token.accessToken());
         }
@@ -1382,7 +1382,7 @@ public class SkillCliExecutorService {
 
         try {
             // 打印写入动作，不打印 token 明文。
-            log.info("[阶段6 CLI执行] 写入tenant_access_token：appId={}，命令={}", properties.getAppId(), command);
+            log.info("[CLI执行] 写入tenant_access_token：appId={}，命令={}", properties.getAppId(), command);
 
             // 创建写入 token 的进程。
             Process process = new ProcessBuilder(command).start();
@@ -1420,7 +1420,7 @@ public class SkillCliExecutorService {
             }
 
             // 打印写入成功日志，不打印 token。
-            log.info("[阶段6 CLI执行] 写入tenant_access_token成功：appId={}，退出码={}", properties.getAppId(), exitCode);
+            log.info("[CLI执行] 写入tenant_access_token成功：appId={}，退出码={}", properties.getAppId(), exitCode);
         } catch (Exception e) {
             // 写入 token 失败时抛出异常。
             throw new IllegalStateException("写入 lark-cli tenant_access_token 异常：" + e.getMessage(), e);
@@ -1471,7 +1471,7 @@ public class SkillCliExecutorService {
         environment.put("LARKSUITE_CLI_NO_UPDATE_NOTIFIER", "1");
 
         // 打印受控环境说明，不打印密钥和 token。
-        log.info("[阶段6 CLI执行] 业务命令环境已调整：appId={}，默认身份={}，已注入对应身份token，已启用严格模式",
+        log.info("[CLI执行] 业务命令环境已调整：appId={}，默认身份={}，已注入对应身份token，已启用严格模式",
                 properties.getAppId(), tokenContext.identity());
 
         // 返回处理后的进程构造器。
@@ -1570,24 +1570,24 @@ public class SkillCliExecutorService {
             boolean finished = process.waitFor(8, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                log.warn("[阶段5 SkillCLI规划] 读取飞书CLI原生Skill超时：业务域={}，原生Skill={}", domain, skillName);
+                log.warn("[SkillCLI规划] 读取飞书CLI原生Skill超时：业务域={}，原生Skill={}", domain, skillName);
                 return "";
             }
 
             String stdout = readStream(process.getInputStream());
             String stderr = readStream(process.getErrorStream());
             if (process.exitValue() != 0 || stdout.isBlank()) {
-                log.warn("[阶段5 SkillCLI规划] 读取飞书CLI原生Skill失败：业务域={}，原生Skill={}，退出码={}，错误={}",
+                log.warn("[SkillCLI规划] 读取飞书CLI原生Skill失败：业务域={}，原生Skill={}，退出码={}，错误={}",
                         domain, skillName, process.exitValue(), truncate(stderr));
                 return "";
             }
 
             nativeSkillCache.put(skillName, stdout);
-            log.info("[阶段5 SkillCLI规划] 已读取飞书CLI原生Skill：业务域={}，原生Skill={}，内容长度={}",
+            log.info("[SkillCLI规划] 已读取飞书CLI原生Skill：业务域={}，原生Skill={}，内容长度={}",
                     domain, skillName, stdout.length());
             return stdout;
         } catch (Exception e) {
-            log.warn("[阶段5 SkillCLI规划] 读取飞书CLI原生Skill异常：业务域={}，原生Skill={}，错误={}",
+            log.warn("[SkillCLI规划] 读取飞书CLI原生Skill异常：业务域={}，原生Skill={}，错误={}",
                     domain, skillName, e.getMessage());
             return "";
         }
