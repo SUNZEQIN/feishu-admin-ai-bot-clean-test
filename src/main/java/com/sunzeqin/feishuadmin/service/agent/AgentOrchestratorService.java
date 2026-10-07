@@ -124,7 +124,7 @@ public class AgentOrchestratorService {
                     memoryText, observations);
 
             // 打印当前轮规划结果。
-            log.info("[Agent规划] 步骤决策：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}，最终回复长度={}",
+            log.debug("[Agent规划] 步骤决策：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}，最终回复长度={}",
                     event.messageId(),
                     step,
                     decision.type(),
@@ -155,7 +155,7 @@ public class AgentOrchestratorService {
             ToolCall toolCall = enrichToolCall(event, decision.toolCall());
 
             // 打印工具执行前日志。
-            log.info("[工具调用] 准备执行工具：消息ID={}，步骤={}，工具={}，入参={}",
+            log.debug("[工具调用] 准备执行工具：消息ID={}，步骤={}，工具={}，入参={}",
                     event.messageId(), step, toolCall.name(), toolCall.params());
 
             // 执行工具。
@@ -164,10 +164,14 @@ public class AgentOrchestratorService {
             // 保存工具观察结果。
             observations.add(result);
 
+            // 每个普通 Agent 步骤只保留一条最终结果 INFO，避免规划层和工具层重复刷屏。
+            log.info("[工具调用] 步骤结果：消息ID={}，步骤={}，工具={}，success={}，message={}，data={}",
+                    event.messageId(), step, result.tool(), result.success(), result.message(), result.data());
+
             // 工作流执行完成后，如果已经生成最终回复，就直接结束，避免再让 LLM 复述一轮。
             String workflowReply = workflowReplyFromToolResult(result);
             if (!workflowReply.isBlank()) {
-                log.info("[阶段10 工作流执行] 工作流已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
+                log.debug("[工作流执行] 工作流已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
                         event.messageId(), step, result.tool(), workflowReply.length());
                 AgentRunResult runResult = new AgentRunResult(true, workflowReply);
                 memoryService.saveAssistantMessage(event, runResult.reply());
@@ -177,7 +181,7 @@ public class AgentOrchestratorService {
             // 普通工具已经生成最终回复时，也直接结束，避免外层 Agent 再规划一轮导致重复回复和耗时变长。
             String finalReply = finalReplyFromToolResult(result);
             if (!finalReply.isBlank()) {
-                log.info("[工具调用] 工具已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
+                log.debug("[工具调用] 工具已生成最终回复，直接结束流程：消息ID={}，步骤={}，工具={}，回复长度={}",
                         event.messageId(), step, result.tool(), finalReply.length());
                 AgentRunResult runResult = new AgentRunResult(result.success(), finalReply);
                 memoryService.saveAssistantMessage(event, runResult.reply());
@@ -188,7 +192,7 @@ public class AgentOrchestratorService {
             String authorizeReply = authorizeReplyFromToolResult(result);
             if (!authorizeReply.isBlank()) {
                 String authorizeUrl = authorizeUrlFromToolResult(result);
-                log.info("[工具调用] 授权链接已生成，直接结束流程：消息ID={}，步骤={}，工具={}",
+                log.debug("[工具调用] 授权链接已生成，直接结束流程：消息ID={}，步骤={}，工具={}",
                         event.messageId(), step, result.tool());
                 AgentRunResult runResult = new AgentRunResult(true, authorizeReply, authorizeUrl);
                 memoryService.saveAssistantMessage(event, runResult.reply());
@@ -241,14 +245,14 @@ public class AgentOrchestratorService {
         try {
             routeResult = workflowRouterService.route(event, memoryText);
         } catch (Exception e) {
-            log.warn("[阶段10 工作流路由] 路由异常，回退到外层Agent规划：消息ID={}，错误={}",
+            log.warn("[工作流路由] 路由异常，回退到外层Agent规划：消息ID={}，错误={}",
                     event.messageId(), e.getMessage());
             return null;
         }
 
         // 未命中时走原来的 Agent 规划。
         if (routeResult == null || !routeResult.matched()) {
-            log.info("[阶段10 工作流路由] 未命中工作流，继续外层Agent规划：消息ID={}，原因={}",
+            log.info("[工作流路由] 未命中工作流，继续外层Agent规划：消息ID={}，原因={}",
                     event.messageId(), routeResult == null ? "路由结果为空" : routeResult.reason());
             return null;
         }
@@ -259,11 +263,11 @@ public class AgentOrchestratorService {
         params.put("arguments", routeResult.arguments());
         ToolCall toolCall = enrichToolCall(event, new ToolCall("workflow.run", params));
 
-        log.info("[阶段10 工作流路由] 准备执行命中工作流：消息ID={}，workflowCode={}，置信度={}，原因={}",
+        log.info("[工作流路由] 准备执行命中工作流：消息ID={}，workflowCode={}，置信度={}，原因={}",
                 event.messageId(), routeResult.workflowCode(), routeResult.confidence(), routeResult.reason());
 
         ToolResult result = toolRegistry.execute(toolCall);
-        log.info("[阶段10 工作流路由] 工作流工具返回：消息ID={}，workflowCode={}，是否成功={}，说明={}，数据字段={}",
+            log.debug("[工作流路由] 工作流工具返回：消息ID={}，workflowCode={}，是否成功={}，说明={}，数据字段={}",
                 event.messageId(), routeResult.workflowCode(), result.success(), result.message(), result.data().keySet());
 
         if (!result.success()) {

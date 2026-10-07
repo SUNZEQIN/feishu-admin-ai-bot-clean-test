@@ -121,7 +121,7 @@ public class WorkflowExecutionService {
         }
 
         long startMillis = System.currentTimeMillis();
-        log.info("[工作流执行] 开始执行：工作流编码={}，名称={}，步骤数={}，初始入参字段={}",
+        log.debug("[工作流执行] 开始执行：工作流编码={}，名称={}，步骤数={}，初始入参字段={}",
                 workflow.workflowCode(), workflow.workflowName(), steps.size(), context.keySet());
 
         List<Map<String, Object>> stepResults = new ArrayList<>();
@@ -130,7 +130,7 @@ public class WorkflowExecutionService {
         for (WorkflowStep step : steps) {
             long stepStartMillis = System.currentTimeMillis();
             Map<String, Object> input = renderInput(step.inputTemplate(), context);
-            log.info("[工作流执行] 步骤开始：工作流编码={}，步骤={}，步骤名称={}，执行器类型={}，工具名称={}，入参字段={}，入参摘要={}，输出变量={}",
+            log.debug("[工作流执行] 步骤开始：工作流编码={}，步骤={}，步骤名称={}，执行器类型={}，工具名称={}，入参字段={}，入参摘要={}，输出变量={}",
                     workflowCode, step.stepNo(), step.stepName(), step.executorType(), step.toolName(),
                     input.keySet(), summarizeInput(input), step.outputKey());
 
@@ -144,8 +144,8 @@ public class WorkflowExecutionService {
                 }
 
                 long costMillis = System.currentTimeMillis() - stepStartMillis;
-                log.info("[工作流执行] 步骤完成：工作流编码={}，步骤={}，执行器类型={}，工具名称={}，输出变量={}，输出摘要={}，耗时={}ms",
-                        workflowCode, step.stepNo(), step.executorType(), step.toolName(), step.outputKey(),
+                log.info("[工作流执行] 执行第{}步：工作流编码={}，步骤名称={}，调用工具={}，结果=成功，输出摘要={}，耗时={}ms",
+                        step.stepNo(), workflowCode, step.stepName(), displayToolName(step),
                         summarizeOutput(output), costMillis);
 
                 stepResults.add(Map.of(
@@ -158,8 +158,8 @@ public class WorkflowExecutionService {
                 ));
             } catch (Exception e) {
                 long costMillis = System.currentTimeMillis() - stepStartMillis;
-                log.warn("[工作流执行] 步骤失败：工作流编码={}，步骤={}，执行器类型={}，工具名称={}，失败策略={}，错误={}，耗时={}ms",
-                        workflowCode, step.stepNo(), step.executorType(), step.toolName(), step.onError(),
+                log.warn("[工作流执行] 执行第{}步：工作流编码={}，步骤名称={}，调用工具={}，结果=失败，失败策略={}，错误={}，耗时={}ms",
+                        step.stepNo(), workflowCode, step.stepName(), displayToolName(step), step.onError(),
                         e.getMessage(), costMillis);
                 throw new IllegalStateException("工作流步骤执行失败：步骤=" + step.stepNo()
                         + "，名称=" + step.stepName() + "，原因=" + e.getMessage(), e);
@@ -171,8 +171,8 @@ public class WorkflowExecutionService {
         }
 
         long costMillis = System.currentTimeMillis() - startMillis;
-        log.info("[工作流执行] 执行完成：工作流编码={}，步骤数={}，上下文字段={}，最终回复长度={}，耗时={}ms",
-                workflowCode, steps.size(), context.keySet(), finalReply.length(), costMillis);
+        log.info("[工作流执行] 执行完成：工作流编码={}，步骤数={}，最终回复长度={}，耗时={}ms",
+                workflowCode, steps.size(), finalReply.length(), costMillis);
 
         return Map.of(
                 "workflowCode", workflow.workflowCode(),
@@ -202,6 +202,13 @@ public class WorkflowExecutionService {
             throw new IllegalArgumentException("JAVA_TOOL 工作流执行暂未接入：" + step.toolName());
         }
         throw new IllegalArgumentException("不支持的执行器类型：" + step.executorType());
+    }
+
+    private String displayToolName(WorkflowStep step) {
+        if (step.toolName() != null && !step.toolName().isBlank()) {
+            return step.toolName();
+        }
+        return step.executorType();
     }
 
     private Object executeCliStep(Map<String, Object> input) {

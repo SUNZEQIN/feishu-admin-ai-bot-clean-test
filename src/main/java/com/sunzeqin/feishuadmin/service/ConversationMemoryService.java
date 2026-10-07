@@ -75,12 +75,15 @@ public class ConversationMemoryService {
         // 追加会话记忆内容。
         appendMessages(builder, messages);
 
-        // 打印记忆读取日志。
-        log.info("会话记忆读取：消息ID={}，范围={}，记忆Key={}，摘要长度={}，近期条数={}",
-                event.messageId(), scope, memoryKey, summary.length(), messages.size());
+        // 打印记忆读取摘要，帮助确认实际注入了哪些历史内容。
+        String memoryText = builder.toString();
+        log.info("会话记忆读取：消息ID={}，范围={}，记忆Key={}，摘要长度={}，近期条数={}，记忆文本长度={}，记忆文本摘要={}",
+                event.messageId(), scope, memoryKey, summary.length(), messages.size(),
+                memoryText.length(), preview(memoryText));
+        log.debug("会话记忆读取完整内容：消息ID={}，记忆文本={}", event.messageId(), memoryText);
 
         // 返回历史记忆文本。
-        return builder.toString();
+        return memoryText;
     }
 
     public void saveUserMessage(FeishuMessageEvent event) {
@@ -152,9 +155,10 @@ public class ConversationMemoryService {
         // 如果消息超过阈值，把旧消息压缩进摘要。
         compressOldMessages(scope, memoryKey, safe(event.chatId()));
 
-        // 打印记忆写入日志。
-        log.info("会话记忆写入：消息ID={}，范围={}，记忆Key={}，角色={}，说明=真实消息只保存一条",
-                event.messageId(), scope, memoryKey, role);
+        // 打印记忆写入摘要，区分用户消息和机器人回复，并确认实际写入内容。
+        log.info("会话记忆写入：消息ID={}，范围={}，记忆Key={}，角色={}，内容长度={}，内容摘要={}",
+                event.messageId(), scope, memoryKey, role, content.length(), preview(content));
+        log.debug("会话记忆写入完整内容：消息ID={}，角色={}，内容={}", event.messageId(), role, content);
     }
 
     private void compressOldMessages(String scope, String memoryKey, String chatId) {
@@ -353,6 +357,20 @@ public class ConversationMemoryService {
     private String safe(String value) {
         // 空字符串保护，避免数据库 NOT NULL 字段写入 null。
         return value == null ? "" : value;
+    }
+
+    private String preview(String value) {
+        // INFO 只保留有限长度并压缩换行，完整内容通过 DEBUG 查看。
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        int maxLength = 500;
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength) + "...";
     }
 
     private Instant toInstant(Timestamp timestamp) {

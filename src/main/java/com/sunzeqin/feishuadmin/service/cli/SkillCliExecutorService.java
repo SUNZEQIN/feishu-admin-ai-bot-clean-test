@@ -1583,7 +1583,7 @@ public class SkillCliExecutorService {
             }
 
             nativeSkillCache.put(skillName, stdout);
-            log.info("[SkillCLI规划] 已读取飞书CLI原生Skill：业务域={}，原生Skill={}，内容长度={}",
+            log.debug("[SkillCLI规划] 已读取飞书CLI原生Skill：业务域={}，原生Skill={}，内容长度={}",
                     domain, skillName, stdout.length());
             return stdout;
         } catch (Exception e) {
@@ -1615,17 +1615,26 @@ public class SkillCliExecutorService {
     private String readAllowedSkills(String primaryDomain) {
         // 保存合并后的 Skill 文档。
         StringBuilder builder = new StringBuilder();
+        List<String> loadedDomains = new ArrayList<>();
 
         // 先放主业务域 Skill，方便模型优先理解当前任务方向。
         appendSkill(builder, primaryDomain);
+        if (!primaryDomain.isBlank()) {
+            loadedDomains.add(primaryDomain);
+        }
 
         // 再放其它白名单业务域 Skill，方便模型处理跨域步骤。
         for (String item : properties.getCliAllowedDomains().split(",")) {
             String domain = item.trim().toLowerCase(Locale.ROOT);
             if (!domain.isBlank() && !domain.equals(primaryDomain)) {
                 appendSkill(builder, domain);
+                loadedDomains.add(domain);
             }
         }
+
+        // 单条汇总日志替代逐个 INFO，避免允许域较多时刷屏；详情仍可通过 DEBUG 查看。
+        log.info("[SkillCLI规划] 原生Skill加载完成：主业务域={}，加载业务域={}，数量={}，合并内容长度={}",
+                primaryDomain, loadedDomains, loadedDomains.size(), builder.length());
 
         // 返回所有允许业务域的 Skill 文档。
         return builder.toString();

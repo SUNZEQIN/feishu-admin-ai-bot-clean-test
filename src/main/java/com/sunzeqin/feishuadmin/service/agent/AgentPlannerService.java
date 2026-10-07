@@ -79,7 +79,7 @@ public class AgentPlannerService {
         String prompt = buildPrompt(userText, chatId, memoryText, observations);
 
         // 打印规划输入摘要，排查提示词和 observation 数量。
-        log.info("[Agent规划] 规划输入：消息ID={}，步骤={}，会话ID={}，观察结果数量={}，记忆长度={}，业务Skill长度={}，工具清单长度={}，观察工具={}，可用工具={}，用户文本={}",
+        log.debug("[Agent规划] 规划输入：消息ID={}，步骤={}，会话ID={}，观察结果数量={}，记忆长度={}，业务Skill长度={}，工具清单长度={}，观察工具={}，可用工具={}，用户文本={}",
                 messageId, step, chatId, observations.size(),
                 memoryText == null ? 0 : memoryText.length(),
                 ecommerceAgentSkill == null ? 0 : ecommerceAgentSkill.length(),
@@ -111,7 +111,7 @@ public class AgentPlannerService {
         AgentDecision decision = parseDecision(answer);
 
         // 打印决策日志，方便排查模型下一步要做什么。
-        log.info("[Agent规划] 规划结果：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}",
+        log.debug("[Agent规划] 规划结果：消息ID={}，步骤={}，决策类型={}，工具={}，原因={}",
                 messageId,
                 step,
                 decision.type(),

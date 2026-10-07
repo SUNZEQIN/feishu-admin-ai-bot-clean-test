@@ -196,7 +196,7 @@ public class ToolRegistryService {
      */
     public ToolResult execute(ToolCall call) {
         // 打印工具调用入参，方便排查 Agent 到底让系统做了什么。
-        log.info("[工具调用] 开始：工具名称={}，入参={}", call.name(), call.params());
+        log.debug("[工具调用] 开始：工具名称={}，入参={}", call.name(), call.params());
 
         // 工具名为空时无法分发。
         if (call.name().isBlank()) {
@@ -340,8 +340,8 @@ public class ToolRegistryService {
     }
 
     private void logResult(ToolResult result) {
-        // 工具结果的三个核心字段统一在 INFO 打印，便于按消息 ID 还原一轮调用。
-        log.info("[工具调用] 工具返回摘要：工具名称={}，success={}，message={}，data={}",
+        // 结果由 Agent 编排层统一打印一条 INFO，这里只保留 DEBUG，避免同一结果重复出现。
+        log.debug("[工具调用] 工具返回摘要：工具名称={}，success={}，message={}，data={}",
                 result.tool(), result.success(), result.message(), result.data());
         log.debug("[工具调用] 工具返回完整数据：工具名称={}，数据={}", result.tool(), result.data());
     }
